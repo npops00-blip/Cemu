@@ -1,3 +1,5 @@
+#include "Cafe/HW/Latte/Core/LatteFovMenu.h"
+#include "input/InputManager.h"
 #include "input/emulated/VPADController.h"
 #include "input/api/Controller.h"
 #ifdef HAS_SDL
@@ -49,6 +51,23 @@ enum ControllerVPADMapping2 : uint32
 void VPADController::VPADRead(VPADStatus_t& status, const BtnRepeat& repeat)
 {
 	controllers_update_states();
+
+	// in-game FOV menu (L3 + R3); blocks game input while open
+	bool menuBlocksInput = false;
+	if (InputManager::instance().get_vpad_controller(0).get() == this)
+	{
+		uint32 bits = 0;
+		const auto menuAxis = get_axis();
+		if (is_mapping_down(kButtonId_StickL)) bits |= FovMenu::kL3;
+		if (is_mapping_down(kButtonId_StickR)) bits |= FovMenu::kR3;
+		if (is_mapping_down(kButtonId_Left) || menuAxis.x < -0.6f) bits |= FovMenu::kLeft;
+		if (is_mapping_down(kButtonId_Right) || menuAxis.x > 0.6f) bits |= FovMenu::kRight;
+		if (is_mapping_down(kButtonId_Up)) bits |= FovMenu::kUp;
+		if (is_mapping_down(kButtonId_Down)) bits |= FovMenu::kDown;
+		if (is_mapping_down(kButtonId_A)) bits |= FovMenu::kA;
+		if (is_mapping_down(kButtonId_B)) bits |= FovMenu::kB;
+		menuBlocksInput = FovMenu::FeedInput(bits);
+	}
 	m_mic_active = false;
 	m_screen_active = false;
 	for (uint32 i = kButtonId_A; i < kButtonId_Max; ++i)
@@ -128,6 +147,14 @@ void VPADController::VPADRead(VPADStatus_t& status, const BtnRepeat& repeat)
 				status.hold |= VPAD_REPEAT;
 			}
 		}
+	}
+
+	if (menuBlocksInput)
+	{
+		status.hold = 0;
+		status.leftStick.x = status.leftStick.y = 0.0f;
+		status.rightStick.x = status.rightStick.y = 0.0f;
+		currentHold = 0;
 	}
 
 	// general
