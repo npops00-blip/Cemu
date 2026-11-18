@@ -6,6 +6,7 @@
 #include "Cafe/TitleList/TitleList.h"
 #include "Cafe/IOSU/PDM/iosu_pdm.h"
 #include "config/ActiveSettings.h"
+#include "input/InputManager.h"
 
 #include <wx/dcbuffer.h>
 #include <wx/graphics.h>
@@ -45,7 +46,7 @@ namespace
 
 HomePanel::HomePanel(wxWindow* parent, Callbacks callbacks)
 	: wxPanel(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS | wxFULL_REPAINT_ON_RESIZE),
-	  m_callbacks(std::move(callbacks)), m_timer(this)
+	  m_callbacks(std::move(callbacks)), m_timer(this), m_padTimer(this)
 {
 	SetBackgroundStyle(wxBG_STYLE_PAINT);
 
@@ -61,18 +62,21 @@ HomePanel::HomePanel(wxWindow* parent, Callbacks callbacks)
 	Bind(wxEVT_LEAVE_WINDOW, &HomePanel::OnMouseLeave, this);
 	Bind(wxEVT_LEFT_UP, &HomePanel::OnLeftUp, this);
 	Bind(wxEVT_KEY_DOWN, &HomePanel::OnKeyDown, this);
-	Bind(wxEVT_TIMER, &HomePanel::OnTimer, this);
+	Bind(wxEVT_TIMER, &HomePanel::OnTimer, this, m_timer.GetId());
+	Bind(wxEVT_TIMER, &HomePanel::OnPadTimer, this, m_padTimer.GetId());
 	Bind(wxEVT_RIGHT_UP, &HomePanel::OnRightUp, this);
 
 	LoadBackground();
 
 	RefreshGame();
 	m_timer.Start(2000);
+	m_padTimer.Start(33);
 }
 
 HomePanel::~HomePanel()
 {
 	m_timer.Stop();
+	m_padTimer.Stop();
 }
 
 void HomePanel::RefreshGame()
@@ -282,7 +286,7 @@ void HomePanel::OnPaint(wxPaintEvent&)
 	gc->SetBrush(wxBrush(wxColour(5, 10, 12, 200)));
 	gc->DrawRectangle(0, h - barH, w, barH);
 	gc->SetFont(MakeFont(10), kCaption);
-	wxString hint = U8("Enter \xE2\x80\x94 \xD0\xB8\xD0\xB3\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C     \xE2\x86\x90 \xE2\x86\x92 \xE2\x80\x94 \xD0\xB2\xD1\x8B\xD0\xB1\xD0\xBE\xD1\x80     \xD0\x9F\xD0\x9A\xD0\x9C \xE2\x80\x94 \xD1\x81\xD0\xBC\xD0\xB5\xD0\xBD\xD0\xB8\xD1\x82\xD1\x8C \xD1\x84\xD0\xBE\xD0\xBD");
+	wxString hint = U8("Enter / A \xE2\x80\x94 \xD0\xB8\xD0\xB3\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C     \xE2\x86\x90 \xE2\x86\x92 \xE2\x80\x94 \xD0\xB2\xD1\x8B\xD0\xB1\xD0\xBE\xD1\x80     \xD0\x9F\xD0\x9A\xD0\x9C \xE2\x80\x94 \xD1\x81\xD0\xBC\xD0\xB5\xD0\xBD\xD0\xB8\xD1\x82\xD1\x8C \xD1\x84\xD0\xBE\xD0\xBD");
 	double hw, hh;
 	gc->GetTextExtent(hint, &hw, &hh);
 	gc->DrawText(hint, w - left - hw, h - barH + (barH - hh) / 2);
@@ -480,4 +484,63 @@ void HomePanel::RemoveBackground()
 	for (const char* e : kBgExts)
 		fs::remove(BackgroundFile(e), ec);
 	LoadBackground();
+}
+
+// gamepad navigation: D-pad / stick left-right to select, A to activate, + (Start) to play
+void HomePanel::OnPadTimer(wxTimerEvent&)
+{
+	if (!IsShownOnScreen())
+		return;
+	wxWindow* top = wxGetTopLevelParent(this);
+	if (!top || !top->IsActive())
+	{
+		m_padPrev = 0;
+		return;
+	}
+	enum : uint32 { kLeft = 1, kRight = 2, kA = 4, kStart = 8 };
+	uint32 state = 0;
+	auto& im = InputManager::instance();
+	for (size_t i = 0; i < InputManager::kMaxController; i++)
+	{
+		const auto controller = im.get_controller(i);
+		if (!controller)
+			continue;
+		controller->controllers_update_states();
+		const auto axis = controller->get_axis();
+		if (controller->is_left_down() || axis.x < -0.6f) state |= kLeft;
+		if (controller->is_right_down() || axis.x > 0.6f) state |= kRight;
+		if (controller->is_a_down()) state |= kA;
+		if (controller->is_start_down()) state |= kStart;
+	}
+	const uint32 pressed = state & ~m_padPrev;
+	m_padPrev = state;
+	const wxLongLong now = wxGetLocalTimeMillis();
+	int dir = 0;
+	if (pressed & kLeft) { dir = -1; m_padRepeatAt = now + 400; }
+	else if (pressed & kRight) { dir = 1; m_padRepeatAt = now + 400; }
+	else if ((state & (kLeft | kRight)) && now >= m_padRepeatAt)
+	{
+		dir = (state & kLeft) ? -1 : 1;
+		m_padRepeatAt = now + 150;
+	}
+	if (dir)
+	{
+		const int n = (int)m_buttons.size();
+		m_focus = (m_focus + dir + n) % n;
+		if (!m_titleId && m_focus == 0)
+			m_focus = (m_focus + dir + n) % n;
+		m_hover = -1;
+		SetFocus();
+		Refresh(false);
+	}
+	if (pressed & kStart)
+	{
+		m_padPrev = 0;
+		LaunchGame();
+	}
+	else if (pressed & kA)
+	{
+		m_padPrev = 0;
+		Activate(m_focus);
+	}
 }

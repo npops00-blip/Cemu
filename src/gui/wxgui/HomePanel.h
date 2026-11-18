@@ -45,6 +45,7 @@ private:
 	void OnKeyDown(wxKeyEvent& event);
 	void OnTimer(wxTimerEvent& event);
 	void OnRightUp(wxMouseEvent& event);
+	void OnPadTimer(wxTimerEvent& event);
 
 	void LoadBackground();
 	void ChooseBackground();
@@ -61,6 +62,9 @@ private:
 	int m_hover = -1;
 	int m_focus = 0;
 	wxTimer m_timer;
+	wxTimer m_padTimer;
+	uint32 m_padPrev = 0;
+	wxLongLong m_padRepeatAt = 0;
 
 	uint64 m_titleId = 0;
 	uint32 m_minutesPlayed = 0;
