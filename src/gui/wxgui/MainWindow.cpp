@@ -6,6 +6,7 @@
 #include "GameUpdateWindow.h"
 #include "CemuUpdateWindow.h"
 #include "GraphicPacksWindow2.h"
+#include "HomePanel.h"
 #include "AudioDebuggerWindow.h"
 #include "input/InputSettings2.h"
 #include "input/HotkeySettings.h"
@@ -86,6 +87,7 @@ enum
 	MAINFRAME_MENU_ID_OPTIONS_SECOND_WINDOW_PADVIEW,
 	MAINFRAME_MENU_ID_OPTIONS_GRAPHIC,
 	MAINFRAME_MENU_ID_OPTIONS_GRAPHIC_PACKS2,
+	MAINFRAME_MENU_ID_OPTIONS_HOME_SCREEN,
 	MAINFRAME_MENU_ID_OPTIONS_GENERAL,
 	MAINFRAME_MENU_ID_OPTIONS_GENERAL2,
 	MAINFRAME_MENU_ID_OPTIONS_AUDIO,
@@ -189,6 +191,7 @@ EVT_MENU(MAINFRAME_MENU_ID_OPTIONS_FULLSCREEN, MainWindow::OnOptionsInput)
 EVT_MENU(MAINFRAME_MENU_ID_OPTIONS_SECOND_WINDOW_PADVIEW, MainWindow::OnOptionsInput)
 EVT_MENU(MAINFRAME_MENU_ID_OPTIONS_GRAPHIC, MainWindow::OnOptionsInput)
 EVT_MENU(MAINFRAME_MENU_ID_OPTIONS_GRAPHIC_PACKS2, MainWindow::OnOptionsInput)
+EVT_MENU(MAINFRAME_MENU_ID_OPTIONS_HOME_SCREEN, MainWindow::OnOptionsInput)
 EVT_MENU(MAINFRAME_MENU_ID_OPTIONS_GENERAL, MainWindow::OnOptionsInput)
 EVT_MENU(MAINFRAME_MENU_ID_OPTIONS_GENERAL2, MainWindow::OnOptionsInput)
 EVT_MENU(MAINFRAME_MENU_ID_OPTIONS_AUDIO, MainWindow::OnOptionsInput)
@@ -409,6 +412,19 @@ void MainWindow::CreateGameListAndStatusBar()
     m_game_list->SetDropTarget(new wxGameDropTarget(this));
     sizer->Add(m_game_list, 1, wxEXPAND);
 
+    // console-style home screen (shown instead of the game list when BotW is installed)
+    HomePanel::Callbacks homeCallbacks;
+    homeCallbacks.openGraphicPacks = [this]() {
+        wxCommandEvent evt(wxEVT_MENU, MAINFRAME_MENU_ID_OPTIONS_GRAPHIC_PACKS2);
+        OnOptionsInput(evt);
+    };
+    homeCallbacks.openSettings = [this]() { OpenSettings(); };
+    homeCallbacks.showGameList = [this]() { ShowHomePanel(false); };
+    homeCallbacks.gameFound = [this]() { ShowHomePanel(true); };
+    m_home_panel = new HomePanel(m_main_panel, homeCallbacks);
+    sizer->Insert(0, m_home_panel, 1, wxEXPAND);
+    ShowHomePanel(false);
+
     // info, warning bar
     m_info_bar = new wxInfoBar(m_main_panel);
     m_info_bar->SetShowHideEffects(wxSHOW_EFFECT_BLEND, wxSHOW_EFFECT_BLEND);
@@ -428,7 +444,20 @@ void MainWindow::DestroyGameListAndStatusBar()
     m_main_panel->Destroy();
     m_main_panel = nullptr;
     m_game_list = nullptr;
+    m_home_panel = nullptr;
     m_info_bar = nullptr;
+}
+
+void MainWindow::ShowHomePanel(bool show)
+{
+    if (!m_home_panel || !m_game_list)
+        return;
+    m_home_panel->Show(show);
+    m_game_list->Show(!show);
+    if (show)
+        m_home_panel->SetFocus();
+    if (m_main_panel)
+        m_main_panel->Layout();
 }
 
 wxString MainWindow::GetInitialWindowTitle()
@@ -901,6 +930,11 @@ void MainWindow::OnOptionsInput(wxCommandEvent& event)
 		g_wxConfig.Save();
 
 		TogglePadView();
+		break;
+	}
+	case MAINFRAME_MENU_ID_OPTIONS_HOME_SCREEN:
+	{
+		ShowHomePanel(true);
 		break;
 	}
 	case MAINFRAME_MENU_ID_OPTIONS_GRAPHIC_PACKS2:
@@ -2255,6 +2289,7 @@ void MainWindow::RecreateMenu()
 	m_fullscreenMenuItem->Check(FullscreenEnabled());
 
 	optionsMenu->Append(MAINFRAME_MENU_ID_OPTIONS_GRAPHIC_PACKS2, _("&Graphic packs"));
+	optionsMenu->Append(MAINFRAME_MENU_ID_OPTIONS_HOME_SCREEN, wxString::FromUTF8("\xD0\x94\xD0\xBE\xD0\xBC\xD0\xB0\xD1\x88\xD0\xBD\xD0\xB8\xD0\xB9 \xD1\x8D\xD0\xBA\xD1\x80\xD0\xB0\xD0\xBD"));
 	m_padViewMenuItem = optionsMenu->AppendCheckItem(MAINFRAME_MENU_ID_OPTIONS_SECOND_WINDOW_PADVIEW, _("&Separate GamePad view"));
 	m_padViewMenuItem->Check(wxConfig.pad_open);
 	optionsMenu->AppendSeparator();

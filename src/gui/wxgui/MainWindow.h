@@ -208,6 +208,8 @@ private:
 
 	// gamelist
 	wxGameList* m_game_list{};
+	class HomePanel* m_home_panel{};
+	void ShowHomePanel(bool show);
 	wxInfoBar* m_info_bar{};
 
 	// menu
