@@ -12,6 +12,9 @@
 #include <wx/utils.h>
 #include <wx/msgdlg.h>
 #include <wx/datetime.h>
+#include <wx/filedlg.h>
+#include <wx/menu.h>
+#include <algorithm>
 
 namespace
 {
@@ -59,6 +62,9 @@ HomePanel::HomePanel(wxWindow* parent, Callbacks callbacks)
 	Bind(wxEVT_LEFT_UP, &HomePanel::OnLeftUp, this);
 	Bind(wxEVT_KEY_DOWN, &HomePanel::OnKeyDown, this);
 	Bind(wxEVT_TIMER, &HomePanel::OnTimer, this);
+	Bind(wxEVT_RIGHT_UP, &HomePanel::OnRightUp, this);
+
+	LoadBackground();
 
 	RefreshGame();
 	m_timer.Start(2000);
@@ -120,7 +126,7 @@ void HomePanel::LayoutButtons()
 	const wxSize sz = GetClientSize();
 	const int left = std::max(40, sz.x / 18);
 	int x = left;
-	const int y = (int)(sz.y * 0.62);
+	const int y = (int)(sz.y * 0.2) + 290;
 	wxClientDC dc(this);
 	dc.SetFont(MakeFont(14, true));
 	for (auto& b : m_buttons)
@@ -150,6 +156,21 @@ void HomePanel::OnPaint(wxPaintEvent&)
 	if (m_buttons.front().rect.IsEmpty())
 		LayoutButtons();
 
+	// custom background image (cover) with darkening for readability
+	if (m_bgImage.IsOk())
+	{
+		if (m_bgScaledFor != sz)
+			RescaleBackground();
+		if (m_bgScaled.IsOk())
+			gc->DrawBitmap(m_bgScaled, 0, 0, w, h);
+		gc->SetPen(*wxTRANSPARENT_PEN);
+		gc->SetBrush(gc->CreateLinearGradientBrush(0, 0, w, 0, wxColour(6, 14, 16, 235), wxColour(6, 14, 16, 40)));
+		gc->DrawRectangle(0, 0, w, h);
+		gc->SetBrush(gc->CreateLinearGradientBrush(0, h * 0.55, 0, h, wxColour(6, 14, 16, 0), wxColour(6, 14, 16, 200)));
+		gc->DrawRectangle(0, h * 0.55, w, h * 0.45);
+	}
+	else
+	{
 	// background
 	gc->SetPen(*wxTRANSPARENT_PEN);
 	gc->SetBrush(gc->CreateLinearGradientBrush(0, 0, w * 0.6, h, wxColour(14, 29, 34), wxColour(7, 11, 13)));
@@ -176,6 +197,7 @@ void HomePanel::OnPaint(wxPaintEvent&)
 		p.CloseSubpath();
 		gc->SetBrush(wxBrush(hl.col));
 		gc->FillPath(p);
+	}
 	}
 
 	const double left = std::max(40.0, w / 18);
@@ -260,7 +282,7 @@ void HomePanel::OnPaint(wxPaintEvent&)
 	gc->SetBrush(wxBrush(wxColour(5, 10, 12, 200)));
 	gc->DrawRectangle(0, h - barH, w, barH);
 	gc->SetFont(MakeFont(10), kCaption);
-	wxString hint = U8("Enter \xE2\x80\x94 \xD0\xB8\xD0\xB3\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C     \xE2\x86\x90 \xE2\x86\x92 \xE2\x80\x94 \xD0\xB2\xD1\x8B\xD0\xB1\xD0\xBE\xD1\x80     F11 \xE2\x80\x94 \xD0\xBF\xD0\xBE\xD0\xBB\xD0\xBD\xD1\x8B\xD0\xB9 \xD1\x8D\xD0\xBA\xD1\x80\xD0\xB0\xD0\xBD");
+	wxString hint = U8("Enter \xE2\x80\x94 \xD0\xB8\xD0\xB3\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C     \xE2\x86\x90 \xE2\x86\x92 \xE2\x80\x94 \xD0\xB2\xD1\x8B\xD0\xB1\xD0\xBE\xD1\x80     \xD0\x9F\xD0\x9A\xD0\x9C \xE2\x80\x94 \xD1\x81\xD0\xBC\xD0\xB5\xD0\xBD\xD0\xB8\xD1\x82\xD1\x8C \xD1\x84\xD0\xBE\xD0\xBD");
 	double hw, hh;
 	gc->GetTextExtent(hint, &hw, &hh);
 	gc->DrawText(hint, w - left - hw, h - barH + (barH - hh) / 2);
@@ -365,4 +387,97 @@ void HomePanel::OpenModManager()
 		}
 	}
 	wxMessageBox(U8("ukmm.exe \xD0\xBD\xD0\xB5 \xD0\xBD\xD0\xB0\xD0\xB9\xD0\xB4\xD0\xB5\xD0\xBD. \xD0\x9F\xD0\xBE\xD0\xBB\xD0\xBE\xD0\xB6\xD0\xB8 UKMM \xD0\xB2 \xD0\xBF\xD0\xB0\xD0\xBF\xD0\xBA\xD1\x83 UKMM \xD1\x80\xD1\x8F\xD0\xB4\xD0\xBE\xD0\xBC \xD1\x81 Cemu.exe."), _("Error"), wxOK | wxICON_WARNING, this);
+}
+
+namespace
+{
+	const char* kBgExts[] = { "png", "jpg", "jpeg", "bmp" };
+
+	fs::path BackgroundFile(const char* ext)
+	{
+		return ActiveSettings::GetUserDataPath(fmt::format("home_background.{}", ext));
+	}
+}
+
+void HomePanel::LoadBackground()
+{
+	m_bgImage = wxImage();
+	m_bgScaled = wxBitmap();
+	m_bgScaledFor = wxDefaultSize;
+	std::error_code ec;
+	for (const char* ext : kBgExts)
+	{
+		const fs::path p = BackgroundFile(ext);
+		if (fs::exists(p, ec))
+		{
+			wxImage img;
+			if (img.LoadFile(wxHelper::FromPath(p)))
+			{
+				m_bgImage = img;
+				break;
+			}
+		}
+	}
+	Refresh(false);
+}
+
+void HomePanel::RescaleBackground()
+{
+	const wxSize sz = GetClientSize();
+	m_bgScaledFor = sz;
+	if (!m_bgImage.IsOk() || sz.x <= 0 || sz.y <= 0)
+		return;
+	const double iw = m_bgImage.GetWidth(), ih = m_bgImage.GetHeight();
+	const double scale = std::max(sz.x / iw, sz.y / ih);
+	const int cw = std::max(1, (int)(sz.x / scale)), ch = std::max(1, (int)(sz.y / scale));
+	const int cx = std::max(0, (int)((iw - cw) / 2)), cy = std::max(0, (int)((ih - ch) / 2));
+	wxImage crop = m_bgImage.GetSubImage(wxRect(cx, cy, std::min(cw, (int)iw - cx), std::min(ch, (int)ih - cy)));
+	crop.Rescale(sz.x, sz.y, wxIMAGE_QUALITY_HIGH);
+	m_bgScaled = wxBitmap(crop);
+}
+
+void HomePanel::OnRightUp(wxMouseEvent&)
+{
+	wxMenu menu;
+	const int idChoose = wxWindow::NewControlId(), idRemove = wxWindow::NewControlId();
+	menu.Append(idChoose, U8("\xD0\x92\xD1\x8B\xD0\xB1\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C \xD1\x84\xD0\xBE\xD0\xBD\xE2\x80\xA6"));
+	menu.Append(idRemove, U8("\xD0\xA1\xD1\x82\xD0\xB0\xD0\xBD\xD0\xB4\xD0\xB0\xD1\x80\xD1\x82\xD0\xBD\xD1\x8B\xD0\xB9 \xD1\x84\xD0\xBE\xD0\xBD"))->Enable(m_bgImage.IsOk());
+	const int sel = GetPopupMenuSelectionFromUser(menu);
+	if (sel == idChoose)
+		ChooseBackground();
+	else if (sel == idRemove)
+		RemoveBackground();
+}
+
+void HomePanel::ChooseBackground()
+{
+	wxFileDialog dlg(this, U8("\xD0\xA4\xD0\xBE\xD0\xBD \xD0\xB4\xD0\xBE\xD0\xBC\xD0\xB0\xD1\x88\xD0\xBD\xD0\xB5\xD0\xB3\xD0\xBE \xD1\x8D\xD0\xBA\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB0"), wxEmptyString, wxEmptyString,
+		"Images (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+	if (dlg.ShowModal() != wxID_OK)
+		return;
+	const fs::path src = wxHelper::MakeFSPath(dlg.GetPath());
+	std::string ext = src.extension().string();
+	if (!ext.empty() && ext[0] == '.')
+		ext = ext.substr(1);
+	std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+	if (ext != "png" && ext != "jpg" && ext != "jpeg" && ext != "bmp")
+		return;
+	std::error_code ec;
+	for (const char* e : kBgExts)
+		fs::remove(BackgroundFile(e), ec);
+	fs::copy_file(src, BackgroundFile(ext.c_str()), fs::copy_options::overwrite_existing, ec);
+	if (ec)
+	{
+		wxMessageBox(wxString::FromUTF8(ec.message()), _("Error"), wxOK | wxICON_ERROR, this);
+		return;
+	}
+	LoadBackground();
+}
+
+void HomePanel::RemoveBackground()
+{
+	std::error_code ec;
+	for (const char* e : kBgExts)
+		fs::remove(BackgroundFile(e), ec);
+	LoadBackground();
 }

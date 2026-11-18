@@ -2,6 +2,8 @@
 
 #include <wx/panel.h>
 #include <wx/timer.h>
+#include <wx/image.h>
+#include <wx/bitmap.h>
 #include <functional>
 #include <vector>
 
@@ -42,6 +44,12 @@ private:
 	void OnLeftUp(wxMouseEvent& event);
 	void OnKeyDown(wxKeyEvent& event);
 	void OnTimer(wxTimerEvent& event);
+	void OnRightUp(wxMouseEvent& event);
+
+	void LoadBackground();
+	void ChooseBackground();
+	void RemoveBackground();
+	void RescaleBackground();
 
 	void LayoutButtons();
 	void Activate(int index);
@@ -59,4 +67,8 @@ private:
 	wxString m_lastPlayed;
 	wxString m_status;
 	bool m_announced = false;
+
+	wxImage m_bgImage;
+	wxBitmap m_bgScaled;
+	wxSize m_bgScaledFor;
 };
