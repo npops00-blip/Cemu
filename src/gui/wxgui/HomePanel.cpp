@@ -16,6 +16,8 @@
 #include <wx/filedlg.h>
 #include <wx/menu.h>
 #include <algorithm>
+#include <wx/toplevel.h>
+#include <wx/time.h>
 
 namespace
 {
@@ -46,7 +48,7 @@ namespace
 
 HomePanel::HomePanel(wxWindow* parent, Callbacks callbacks)
 	: wxPanel(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS | wxFULL_REPAINT_ON_RESIZE),
-	  m_callbacks(std::move(callbacks)), m_timer(this), m_padTimer(this)
+	  m_callbacks(std::move(callbacks)), m_timer(this, wxWindow::NewControlId()), m_padTimer(this, wxWindow::NewControlId())
 {
 	SetBackgroundStyle(wxBG_STYLE_PAINT);
 
@@ -491,7 +493,7 @@ void HomePanel::OnPadTimer(wxTimerEvent&)
 {
 	if (!IsShownOnScreen())
 		return;
-	wxWindow* top = wxGetTopLevelParent(this);
+	auto* top = dynamic_cast<wxTopLevelWindow*>(wxGetTopLevelParent(this));
 	if (!top || !top->IsActive())
 	{
 		m_padPrev = 0;
