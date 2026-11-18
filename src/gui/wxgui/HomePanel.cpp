@@ -7,6 +7,8 @@
 #include "Cafe/IOSU/PDM/iosu_pdm.h"
 #include "config/ActiveSettings.h"
 #include "input/InputManager.h"
+#include "Cafe/GraphicPack/GraphicPack2.h"
+#include "config/CemuConfig.h"
 
 #include <wx/dcbuffer.h>
 #include <wx/graphics.h>
@@ -53,7 +55,7 @@ HomePanel::HomePanel(wxWindow* parent, Callbacks callbacks)
 	SetBackgroundStyle(wxBG_STYLE_PAINT);
 
 	m_buttons.push_back({ U8("\xD0\x98\xD0\xB3\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C"), "Enter", {}, true, [this]() { LaunchGame(); } });
-	m_buttons.push_back({ U8("\xD0\x93\xD1\x80\xD0\xB0\xD1\x84\xD0\xBF\xD0\xB0\xD0\xBA\xD0\xB8"), "G", {}, false, [this]() { if (m_callbacks.openGraphicPacks) m_callbacks.openGraphicPacks(); } });
+	m_buttons.push_back({ U8("\xD0\x93\xD1\x80\xD0\xB0\xD1\x84\xD0\xBF\xD0\xB0\xD0\xBA\xD0\xB8"), "G", {}, false, [this]() { ShowPacks(); } });
 	m_buttons.push_back({ U8("\xD0\x9C\xD0\xBE\xD0\xB4\xD1\x8B (UKMM)"), "M", {}, false, [this]() { OpenModManager(); } });
 	m_buttons.push_back({ U8("\xD0\x9D\xD0\xB0\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB9\xD0\xBA\xD0\xB8"), "S", {}, false, [this]() { if (m_callbacks.openSettings) m_callbacks.openSettings(); } });
 	m_buttons.push_back({ U8("\xD0\xA1\xD0\xBF\xD0\xB8\xD1\x81\xD0\xBE\xD0\xBA \xD0\xB8\xD0\xB3\xD1\x80"), "L", {}, false, [this]() { if (m_callbacks.showGameList) m_callbacks.showGameList(); } });
@@ -211,6 +213,12 @@ void HomePanel::OnPaint(wxPaintEvent&)
 	gc->SetFont(MakeFont(10, true), wxColour(159, 217, 201));
 	gc->DrawText(U8("C E M U   \xC2\xB7   B O T W"), left, 28);
 
+	if (m_mode == Mode::Packs)
+	{
+		PaintPacks(gc.get(), w, h, left);
+		return;
+	}
+
 	if (!m_titleId)
 	{
 		gc->SetFont(MakeFont(20, true), kText);
@@ -298,6 +306,8 @@ void HomePanel::OnPaint(wxPaintEvent&)
 
 void HomePanel::OnMouseMove(wxMouseEvent& event)
 {
+	if (m_mode == Mode::Packs)
+		return;
 	int hover = -1;
 	for (size_t i = 0; i < m_buttons.size(); i++)
 		if (m_buttons[i].rect.Contains(event.GetPosition()))
@@ -322,6 +332,22 @@ void HomePanel::OnMouseLeave(wxMouseEvent&)
 void HomePanel::OnLeftUp(wxMouseEvent& event)
 {
 	SetFocus();
+	if (m_mode == Mode::Packs)
+	{
+		for (size_t i = 0; i < m_packRows.size(); i++)
+		{
+			if (m_packRows[i].rect.Contains(event.GetPosition()))
+			{
+				m_packSel = (int)i;
+				if (m_packRows[i].isPreset)
+					PacksCycle(event.GetPosition().x > m_packRows[i].rect.GetX() + m_packRows[i].rect.GetWidth() / 2 ? 1 : -1);
+				else
+					PacksActivate();
+				return;
+			}
+		}
+		return;
+	}
 	for (size_t i = 0; i < m_buttons.size(); i++)
 		if (m_buttons[i].rect.Contains(event.GetPosition()))
 			Activate((int)i);
@@ -329,6 +355,19 @@ void HomePanel::OnLeftUp(wxMouseEvent& event)
 
 void HomePanel::OnKeyDown(wxKeyEvent& event)
 {
+	if (m_mode == Mode::Packs)
+	{
+		switch (event.GetKeyCode())
+		{
+		case WXK_UP: PacksMove(-1); return;
+		case WXK_DOWN: PacksMove(1); return;
+		case WXK_LEFT: PacksCycle(-1); return;
+		case WXK_RIGHT: PacksCycle(1); return;
+		case WXK_RETURN: case WXK_NUMPAD_ENTER: case WXK_SPACE: PacksActivate(); return;
+		case WXK_ESCAPE: case WXK_BACK: LeavePacks(); return;
+		default: event.Skip(); return;
+		}
+	}
 	switch (event.GetKeyCode())
 	{
 	case WXK_LEFT:
@@ -488,7 +527,7 @@ void HomePanel::RemoveBackground()
 	LoadBackground();
 }
 
-// gamepad navigation: D-pad / stick left-right to select, A to activate, + (Start) to play
+// gamepad navigation (home: left/right + A, Start = play; graphic packs: up/down, left/right, A, B)
 void HomePanel::OnPadTimer(wxTimerEvent&)
 {
 	if (!IsShownOnScreen())
@@ -499,7 +538,7 @@ void HomePanel::OnPadTimer(wxTimerEvent&)
 		m_padPrev = 0;
 		return;
 	}
-	enum : uint32 { kLeft = 1, kRight = 2, kA = 4, kStart = 8 };
+	enum : uint32 { kLeft = 1, kRight = 2, kA = 4, kStart = 8, kUp = 16, kDown = 32, kB = 64 };
 	uint32 state = 0;
 	auto& im = InputManager::instance();
 	for (size_t i = 0; i < InputManager::kMaxController; i++)
@@ -511,21 +550,48 @@ void HomePanel::OnPadTimer(wxTimerEvent&)
 		const auto axis = controller->get_axis();
 		if (controller->is_left_down() || axis.x < -0.6f) state |= kLeft;
 		if (controller->is_right_down() || axis.x > 0.6f) state |= kRight;
+		if (controller->is_up_down() || axis.y > 0.6f) state |= kUp;
+		if (controller->is_down_down() || axis.y < -0.6f) state |= kDown;
 		if (controller->is_a_down()) state |= kA;
+		if (controller->is_b_down()) state |= kB;
 		if (controller->is_start_down()) state |= kStart;
 	}
 	const uint32 pressed = state & ~m_padPrev;
 	m_padPrev = state;
 	const wxLongLong now = wxGetLocalTimeMillis();
+
+	// direction with auto-repeat: -1/+1 horizontal, -2/+2 vertical
 	int dir = 0;
-	if (pressed & kLeft) { dir = -1; m_padRepeatAt = now + 400; }
-	else if (pressed & kRight) { dir = 1; m_padRepeatAt = now + 400; }
-	else if ((state & (kLeft | kRight)) && now >= m_padRepeatAt)
+	auto dirOf = [](uint32 bits) { return (bits & kLeft) ? -1 : (bits & kRight) ? 1 : (bits & kUp) ? -2 : (bits & kDown) ? 2 : 0; };
+	if (const int d = dirOf(pressed))
 	{
-		dir = (state & kLeft) ? -1 : 1;
-		m_padRepeatAt = now + 150;
+		dir = d;
+		m_padRepeatAt = now + 400;
 	}
-	if (dir)
+	else if (dirOf(state) && now >= m_padRepeatAt)
+	{
+		dir = dirOf(state);
+		m_padRepeatAt = now + 130;
+	}
+
+	if (m_mode == Mode::Packs)
+	{
+		SetFocus();
+		if (dir == -2 || dir == 2)
+			PacksMove(dir / 2);
+		else if (dir)
+			PacksCycle(dir);
+		if (pressed & kA)
+			PacksActivate();
+		else if (pressed & kB)
+		{
+			m_padPrev = state;
+			LeavePacks();
+		}
+		return;
+	}
+
+	if (dir == -1 || dir == 1)
 	{
 		const int n = (int)m_buttons.size();
 		m_focus = (m_focus + dir + n) % n;
@@ -536,13 +602,253 @@ void HomePanel::OnPadTimer(wxTimerEvent&)
 		Refresh(false);
 	}
 	if (pressed & kStart)
-	{
-		m_padPrev = 0;
 		LaunchGame();
-	}
 	else if (pressed & kA)
-	{
-		m_padPrev = 0;
 		Activate(m_focus);
+}
+
+// ---------------------------------------------------------------- graphic packs screen
+
+void HomePanel::ShowPacks()
+{
+	m_mode = Mode::Packs;
+	m_packSel = 0;
+	m_packScroll = 0;
+	m_packsDirty = false;
+	m_hover = -1;
+	SetCursor(wxNullCursor);
+	RebuildPackRows();
+	SetFocus();
+	Refresh(false);
+}
+
+void HomePanel::LeavePacks()
+{
+	if (m_packsDirty)
+		SavePacks();
+	m_mode = Mode::Home;
+	m_status = m_packsDirty ? U8("\xD0\x93\xD1\x80\xD0\xB0\xD1\x84\xD0\xBF\xD0\xB0\xD0\xBA\xD0\xB8 \xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBD\xD1\x8B. \xD0\x98\xD0\xB7\xD0\xBC\xD0\xB5\xD0\xBD\xD0\xB5\xD0\xBD\xD0\xB8\xD1\x8F \xD0\xBF\xD1\x80\xD0\xB8\xD0\xBC\xD0\xB5\xD0\xBD\xD1\x8F\xD1\x82\xD1\x81\xD1\x8F \xD0\xBF\xD1\x80\xD0\xB8 \xD0\xB7\xD0\xB0\xD0\xBF\xD1\x83\xD1\x81\xD0\xBA\xD0\xB5 \xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B.") : wxString();
+	m_packsDirty = false;
+	Refresh(false);
+}
+
+void HomePanel::RebuildPackRows()
+{
+	std::string selPath, selCat;
+	bool selPreset = false;
+	if (m_packSel >= 0 && m_packSel < (int)m_packRows.size())
+	{
+		selPath = m_packRows[m_packSel].pack->GetNormalizedPathString();
+		selCat = m_packRows[m_packSel].category;
+		selPreset = m_packRows[m_packSel].isPreset;
 	}
+	m_packRows.clear();
+	std::vector<std::shared_ptr<GraphicPack2>> packs;
+	for (const auto& gp : GraphicPack2::GetGraphicPacks())
+		if (m_titleId && gp->ContainsTitleId(m_titleId))
+			packs.push_back(gp);
+	std::sort(packs.begin(), packs.end(), [](const auto& a, const auto& b) { return a->GetVirtualPath() < b->GetVirtualPath(); });
+	for (const auto& gp : packs)
+	{
+		m_packRows.push_back({ gp, "", false, {} });
+		if (!gp->IsEnabled())
+			continue;
+		std::vector<std::string> order;
+		const auto cats = gp->GetCategorizedPresets(order);
+		for (const auto& cat : order)
+		{
+			const auto it = cats.find(cat);
+			if (it == cats.end())
+				continue;
+			const bool anyVisible = std::any_of(it->second.begin(), it->second.end(), [](const auto& p) { return p->visible; });
+			if (anyVisible)
+				m_packRows.push_back({ gp, cat, true, {} });
+		}
+	}
+	m_packSel = 0;
+	for (size_t i = 0; i < m_packRows.size(); i++)
+	{
+		if (m_packRows[i].pack->GetNormalizedPathString() == selPath && m_packRows[i].category == selCat && m_packRows[i].isPreset == selPreset)
+		{
+			m_packSel = (int)i;
+			break;
+		}
+	}
+}
+
+void HomePanel::PacksMove(int delta)
+{
+	if (m_packRows.empty())
+		return;
+	m_packSel = std::clamp(m_packSel + delta, 0, (int)m_packRows.size() - 1);
+	Refresh(false);
+}
+
+void HomePanel::PacksActivate()
+{
+	if (m_packSel < 0 || m_packSel >= (int)m_packRows.size())
+		return;
+	auto& row = m_packRows[m_packSel];
+	if (row.isPreset)
+	{
+		PacksCycle(1);
+		return;
+	}
+	row.pack->SetEnabled(!row.pack->IsEnabled());
+	m_packsDirty = true;
+	RebuildPackRows();
+	Refresh(false);
+}
+
+void HomePanel::PacksCycle(int dir)
+{
+	if (m_packSel < 0 || m_packSel >= (int)m_packRows.size())
+		return;
+	auto& row = m_packRows[m_packSel];
+	if (!row.isPreset)
+	{
+		// left = off, right = on for the pack row itself
+		const bool want = dir > 0;
+		if (row.pack->IsEnabled() != want)
+			PacksActivate();
+		return;
+	}
+	std::vector<std::string> order;
+	const auto cats = row.pack->GetCategorizedPresets(order);
+	const auto it = cats.find(row.category);
+	if (it == cats.end())
+		return;
+	std::vector<std::string> names;
+	for (const auto& p : it->second)
+		if (p->visible)
+			names.push_back(p->name);
+	if (names.empty())
+		return;
+	const std::string current = row.pack->GetActivePreset(row.category);
+	int idx = 0;
+	for (size_t i = 0; i < names.size(); i++)
+		if (names[i] == current)
+			idx = (int)i;
+	idx = (idx + dir + (int)names.size()) % (int)names.size();
+	row.pack->SetActivePreset(row.category, names[idx]);
+	m_packsDirty = true;
+	RebuildPackRows(); // visibility of other categories may depend on this preset
+	Refresh(false);
+}
+
+void HomePanel::SavePacks()
+{
+	auto& data = GetConfigHandle().data();
+	data.graphic_pack_entries.clear();
+	for (const auto& gp : GraphicPack2::GetGraphicPacks())
+	{
+		auto filename = _utf8ToPath(gp->GetNormalizedPathString());
+		if (gp->IsEnabled())
+		{
+			data.graphic_pack_entries.try_emplace(filename);
+			auto& it = data.graphic_pack_entries[filename];
+			for (const auto& preset : gp->GetActivePresets())
+				it.try_emplace(preset->category, preset->name);
+		}
+		else if (gp->IsDefaultEnabled())
+		{
+			data.graphic_pack_entries.try_emplace(filename);
+			auto& it = data.graphic_pack_entries[filename];
+			it.try_emplace("_disabled", "false");
+		}
+	}
+	GetConfigHandle().Save();
+}
+
+void HomePanel::PaintPacks(wxGraphicsContext* gc, double w, double h, double left)
+{
+	// darker veil for readability
+	gc->SetPen(*wxTRANSPARENT_PEN);
+	gc->SetBrush(wxBrush(wxColour(6, 14, 16, 150)));
+	gc->DrawRectangle(0, 0, w, h);
+
+	double y = 70;
+	gc->SetFont(MakeFont(26, true), kText);
+	gc->DrawText(U8("\xD0\x93\xD1\x80\xD0\xB0\xD1\x84\xD0\xB8\xD1\x87\xD0\xB5\xD1\x81\xD0\xBA\xD0\xB8\xD0\xB5 \xD0\xBF\xD0\xB0\xD0\xBA\xD0\xB5\xD1\x82\xD1\x8B"), left, y);
+	y += 52;
+	gc->SetFont(MakeFont(11), kCaption);
+	gc->DrawText(U8("\xD0\x98\xD0\xB7\xD0\xBC\xD0\xB5\xD0\xBD\xD0\xB5\xD0\xBD\xD0\xB8\xD1\x8F \xD0\xBF\xD1\x80\xD0\xB8\xD0\xBC\xD0\xB5\xD0\xBD\xD1\x8F\xD1\x8E\xD1\x82\xD1\x81\xD1\x8F \xD0\xBF\xD1\x80\xD0\xB8 \xD1\x81\xD0\xBB\xD0\xB5\xD0\xB4\xD1\x83\xD1\x8E\xD1\x89\xD0\xB5\xD0\xBC \xD0\xB7\xD0\xB0\xD0\xBF\xD1\x83\xD1\x81\xD0\xBA\xD0\xB5 \xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B."), left, y);
+	y += 36;
+
+	const double barH = 56;
+	const double rowH = 46, gap = 6;
+	const double listTop = y, listBottom = h - barH - 20;
+	const int visibleRows = std::max(1, (int)((listBottom - listTop) / (rowH + gap)));
+	if (m_packSel < m_packScroll)
+		m_packScroll = m_packSel;
+	if (m_packSel >= m_packScroll + visibleRows)
+		m_packScroll = m_packSel - visibleRows + 1;
+	m_packScroll = std::clamp(m_packScroll, 0, std::max(0, (int)m_packRows.size() - visibleRows));
+
+	const double listW = std::min(w - left * 2, 1100.0);
+	for (auto& r : m_packRows)
+		r.rect = wxRect();
+	if (m_packRows.empty())
+	{
+		gc->SetFont(MakeFont(14), kMuted);
+		gc->DrawText(U8("\xD0\x93\xD1\x80\xD0\xB0\xD1\x84\xD0\xBF\xD0\xB0\xD0\xBA\xD0\xB8 \xD0\xB4\xD0\xBB\xD1\x8F Breath of the Wild \xD0\xBD\xD0\xB5 \xD0\xBD\xD0\xB0\xD0\xB9\xD0\xB4\xD0\xB5\xD0\xBD\xD1\x8B."), left, y);
+	}
+	for (int i = m_packScroll; i < (int)m_packRows.size() && i < m_packScroll + visibleRows; i++)
+	{
+		auto& r = m_packRows[i];
+		const double indent = r.isPreset ? 40 : 0;
+		const wxRect rect((int)(left + indent), (int)y, (int)(listW - indent), (int)rowH);
+		r.rect = rect;
+		const bool sel = i == m_packSel;
+		gc->SetPen(sel ? wxPen(kAccent, 2) : *wxTRANSPARENT_PEN);
+		gc->SetBrush(wxBrush(sel ? wxColour(31, 74, 66, 230) : wxColour(16, 30, 33, r.isPreset ? 170 : 210)));
+		RoundRect(gc, rect, 10);
+		const double ty = rect.y + rowH / 2;
+		if (!r.isPreset)
+		{
+			// switch
+			const bool on = r.pack->IsEnabled();
+			const double sx = rect.x + 16, sy = ty - 11;
+			gc->SetPen(*wxTRANSPARENT_PEN);
+			gc->SetBrush(wxBrush(on ? kAccent : wxColour(255, 255, 255, 50)));
+			gc->DrawRoundedRectangle(sx, sy, 40, 22, 11);
+			gc->SetBrush(wxBrush(on ? wxColour(6, 35, 28) : wxColour(207, 227, 221)));
+			gc->DrawEllipse(on ? sx + 21 : sx + 3, sy + 3, 16, 16);
+			std::string name = r.pack->GetVirtualPath();
+			const auto slash = name.find('/');
+			if (slash != std::string::npos && name.substr(0, slash).find("Breath of the Wild") != std::string::npos)
+				name = name.substr(slash + 1);
+			for (auto& c : name)
+				if (c == '/') c = ' ';
+			wxString label = wxString::FromUTF8(name);
+			label.Replace("  ", U8(" \xC3\xA2\xC2\x80\xC2\xBA "));
+			gc->SetFont(MakeFont(13, true), on ? kText : kMuted);
+			double tw, th;
+			gc->GetTextExtent(label, &tw, &th);
+			gc->DrawText(label, sx + 56, ty - th / 2);
+		}
+		else
+		{
+			gc->SetFont(MakeFont(12), kCaption);
+			const wxString cat = r.category.empty() ? U8("\xD0\x9F\xD1\x80\xD0\xB5\xD1\x81\xD0\xB5\xD1\x82") : wxString::FromUTF8(r.category);
+			double tw, th;
+			gc->GetTextExtent(cat, &tw, &th);
+			gc->DrawText(cat, rect.x + 18, ty - th / 2);
+			const wxString val = U8("\xC3\xA2\xC2\x80\xC2\xB9  ") + wxString::FromUTF8(r.pack->GetActivePreset(r.category)) + U8("  \xC3\xA2\xC2\x80\xC2\xBA");
+			gc->SetFont(MakeFont(12, true), sel ? kAccent : kText);
+			gc->GetTextExtent(val, &tw, &th);
+			gc->DrawText(val, rect.x + rect.width - 18 - tw, ty - th / 2);
+		}
+		y += rowH + gap;
+	}
+
+	// bottom bar
+	gc->SetPen(*wxTRANSPARENT_PEN);
+	gc->SetBrush(wxBrush(wxColour(5, 10, 12, 200)));
+	gc->DrawRectangle(0, h - barH, w, barH);
+	gc->SetFont(MakeFont(10), kCaption);
+	const wxString hint = U8("\xC3\xA2\xC2\x86\xC2\x91 \xC3\xA2\xC2\x86\xC2\x93 \xE2\x80\x94 \xD0\xB2\xD1\x8B\xD0\xB1\xD0\xBE\xD1\x80     \xC3\xA2\xC2\x86\xC2\x90 \xC3\xA2\xC2\x86\xC2\x92 \xE2\x80\x94 \xD0\xBF\xD1\x80\xD0\xB5\xD1\x81\xD0\xB5\xD1\x82 / \xD0\xB2\xD0\xBA\xD0\xBB-\xD0\xB2\xD1\x8B\xD0\xBA\xD0\xBB     A / Enter \xE2\x80\x94 \xD0\xBF\xD0\xB5\xD1\x80\xD0\xB5\xD0\xBA\xD0\xBB\xD1\x8E\xD1\x87\xD0\xB8\xD1\x82\xD1\x8C     B / Esc \xE2\x80\x94 \xD0\xBD\xD0\xB0\xD0\xB7\xD0\xB0\xD0\xB4");
+	double hw, hh;
+	gc->GetTextExtent(hint, &hw, &hh);
+	gc->DrawText(hint, w - left - hw, h - barH + (barH - hh) / 2);
 }

@@ -6,6 +6,10 @@
 #include <wx/bitmap.h>
 #include <functional>
 #include <vector>
+#include <memory>
+#include <string>
+class wxGraphicsContext;
+class GraphicPack2;
 
 // Console-style home screen for a single game (Breath of the Wild).
 // Shown in place of the game list; everything is custom painted.
@@ -55,6 +59,29 @@ private:
 	void LayoutButtons();
 	void Activate(int index);
 	void LaunchGame();
+
+	// gamepad-friendly graphic pack screen
+	struct PackRow
+	{
+		std::shared_ptr<GraphicPack2> pack;
+		std::string category; // empty for the pack row itself
+		bool isPreset = false;
+		wxRect rect;
+	};
+	enum class Mode { Home, Packs };
+	Mode m_mode = Mode::Home;
+	std::vector<PackRow> m_packRows;
+	int m_packSel = 0;
+	int m_packScroll = 0;
+	bool m_packsDirty = false;
+	void ShowPacks();
+	void LeavePacks();
+	void RebuildPackRows();
+	void PaintPacks(wxGraphicsContext* gc, double w, double h, double left);
+	void PacksMove(int delta);
+	void PacksActivate();
+	void PacksCycle(int dir);
+	void SavePacks();
 	void OpenModManager();
 
 	Callbacks m_callbacks;
