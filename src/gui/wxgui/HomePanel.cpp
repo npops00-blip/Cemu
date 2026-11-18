@@ -818,10 +818,8 @@ void HomePanel::PaintPacks(wxGraphicsContext* gc, double w, double h, double lef
 			const auto slash = name.find('/');
 			if (slash != std::string::npos && name.substr(0, slash).find("Breath of the Wild") != std::string::npos)
 				name = name.substr(slash + 1);
-			for (auto& c : name)
-				if (c == '/') c = ' ';
 			wxString label = wxString::FromUTF8(name);
-			label.Replace("  ", U8(" \xC3\xA2\xC2\x80\xC2\xBA "));
+			label.Replace("/", U8(" \xE2\x80\xBA "));
 			gc->SetFont(MakeFont(13, true), on ? kText : kMuted);
 			double tw, th;
 			gc->GetTextExtent(label, &tw, &th);
@@ -834,7 +832,7 @@ void HomePanel::PaintPacks(wxGraphicsContext* gc, double w, double h, double lef
 			double tw, th;
 			gc->GetTextExtent(cat, &tw, &th);
 			gc->DrawText(cat, rect.x + 18, ty - th / 2);
-			const wxString val = U8("\xC3\xA2\xC2\x80\xC2\xB9  ") + wxString::FromUTF8(r.pack->GetActivePreset(r.category)) + U8("  \xC3\xA2\xC2\x80\xC2\xBA");
+			const wxString val = U8("\xE2\x80\xB9  ") + wxString::FromUTF8(r.pack->GetActivePreset(r.category)) + U8("  \xE2\x80\xBA");
 			gc->SetFont(MakeFont(12, true), sel ? kAccent : kText);
 			gc->GetTextExtent(val, &tw, &th);
 			gc->DrawText(val, rect.x + rect.width - 18 - tw, ty - th / 2);
@@ -847,7 +845,7 @@ void HomePanel::PaintPacks(wxGraphicsContext* gc, double w, double h, double lef
 	gc->SetBrush(wxBrush(wxColour(5, 10, 12, 200)));
 	gc->DrawRectangle(0, h - barH, w, barH);
 	gc->SetFont(MakeFont(10), kCaption);
-	const wxString hint = U8("\xC3\xA2\xC2\x86\xC2\x91 \xC3\xA2\xC2\x86\xC2\x93 \xE2\x80\x94 \xD0\xB2\xD1\x8B\xD0\xB1\xD0\xBE\xD1\x80     \xC3\xA2\xC2\x86\xC2\x90 \xC3\xA2\xC2\x86\xC2\x92 \xE2\x80\x94 \xD0\xBF\xD1\x80\xD0\xB5\xD1\x81\xD0\xB5\xD1\x82 / \xD0\xB2\xD0\xBA\xD0\xBB-\xD0\xB2\xD1\x8B\xD0\xBA\xD0\xBB     A / Enter \xE2\x80\x94 \xD0\xBF\xD0\xB5\xD1\x80\xD0\xB5\xD0\xBA\xD0\xBB\xD1\x8E\xD1\x87\xD0\xB8\xD1\x82\xD1\x8C     B / Esc \xE2\x80\x94 \xD0\xBD\xD0\xB0\xD0\xB7\xD0\xB0\xD0\xB4");
+	const wxString hint = U8("\xE2\x86\x91 \xE2\x86\x93 \xE2\x80\x94 \xD0\xB2\xD1\x8B\xD0\xB1\xD0\xBE\xD1\x80     \xE2\x86\x90 \xE2\x86\x92 \xE2\x80\x94 \xD0\xBF\xD1\x80\xD0\xB5\xD1\x81\xD0\xB5\xD1\x82 / \xD0\xB2\xD0\xBA\xD0\xBB-\xD0\xB2\xD1\x8B\xD0\xBA\xD0\xBB     A / Enter \xE2\x80\x94 \xD0\xBF\xD0\xB5\xD1\x80\xD0\xB5\xD0\xBA\xD0\xBB\xD1\x8E\xD1\x87\xD0\xB8\xD1\x82\xD1\x8C     B / Esc \xE2\x80\x94 \xD0\xBD\xD0\xB0\xD0\xB7\xD0\xB0\xD0\xB4");
 	double hw, hh;
 	gc->GetTextExtent(hint, &hw, &hh);
 	gc->DrawText(hint, w - left - hw, h - barH + (barH - hh) / 2);
