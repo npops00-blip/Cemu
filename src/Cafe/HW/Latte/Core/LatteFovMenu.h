@@ -19,6 +19,10 @@ namespace FovMenu
 		kDown = 1 << 5,
 		kA = 1 << 6,
 		kB = 1 << 7,
+		// extra bits used only by GUI gamepad navigation
+		kLB = 1 << 8,
+		kRB = 1 << 9,
+		kStart = 1 << 10,
 	};
 
 	// called from the VPAD read path (CPU thread) once per read with the raw button state.

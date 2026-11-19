@@ -69,6 +69,14 @@ HomePanel::HomePanel(wxWindow* parent, Callbacks callbacks)
 	Bind(wxEVT_TIMER, &HomePanel::OnTimer, this, m_timer.GetId());
 	Bind(wxEVT_TIMER, &HomePanel::OnPadTimer, this, m_padTimer.GetId());
 	Bind(wxEVT_RIGHT_UP, &HomePanel::OnRightUp, this);
+	Bind(wxEVT_MOUSEWHEEL, [this](wxMouseEvent& e) {
+		if (m_mode != Mode::Packs || m_packRows.empty())
+			return;
+		const int steps = e.GetWheelRotation() / std::max(1, e.GetWheelDelta());
+		m_packScroll = std::max(0, m_packScroll - steps * 3);
+		m_packSel = std::clamp(m_packSel - steps * 3, 0, (int)m_packRows.size() - 1);
+		Refresh(false);
+	});
 
 	LoadBackground();
 

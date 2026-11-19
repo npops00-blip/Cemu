@@ -287,5 +287,8 @@ uint32 ProController::fov_menu_bits() const
 	if (is_mapping_down(kButtonId_Down)) bits |= FovMenu::kDown;
 	if (is_mapping_down(kButtonId_A)) bits |= FovMenu::kA;
 	if (is_mapping_down(kButtonId_B)) bits |= FovMenu::kB;
+	if (is_mapping_down(kButtonId_L)) bits |= FovMenu::kLB;
+	if (is_mapping_down(kButtonId_R)) bits |= FovMenu::kRB;
+	if (is_mapping_down(kButtonId_Plus)) bits |= FovMenu::kStart;
 	return bits;
 }

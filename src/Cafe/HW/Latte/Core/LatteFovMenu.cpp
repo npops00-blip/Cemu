@@ -124,6 +124,7 @@ namespace FovMenu
 
 	bool FeedInput(uint32 bits)
 	{
+		bits &= 0xFF; // only menu-relevant buttons
 		std::unique_lock lock(s_mutex);
 		const uint32 pressed = bits & ~s_prevBits;
 		s_prevBits = bits;

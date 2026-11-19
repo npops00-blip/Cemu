@@ -209,6 +209,7 @@ private:
 	// gamelist
 	wxGameList* m_game_list{};
 	class HomePanel* m_home_panel{};
+	class GamepadNavigator* m_gamepad_nav{};
 	void ShowHomePanel(bool show);
 	wxInfoBar* m_info_bar{};
 

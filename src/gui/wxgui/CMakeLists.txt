@@ -58,6 +58,8 @@ add_library(CemuWxGui STATIC
   GettingStartedDialog.h
   GraphicPacksWindow2.cpp
   GraphicPacksWindow2.h
+  GamepadNavigator.cpp
+  GamepadNavigator.h
   HomePanel.cpp
   HomePanel.h
   wxWindowSystem.cpp

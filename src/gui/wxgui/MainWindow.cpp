@@ -7,6 +7,7 @@
 #include "CemuUpdateWindow.h"
 #include "GraphicPacksWindow2.h"
 #include "HomePanel.h"
+#include "GamepadNavigator.h"
 #include "AudioDebuggerWindow.h"
 #include "input/InputSettings2.h"
 #include "input/HotkeySettings.h"
@@ -422,6 +423,8 @@ void MainWindow::CreateGameListAndStatusBar()
     homeCallbacks.showGameList = [this]() { ShowHomePanel(false); };
     homeCallbacks.gameFound = [this]() { ShowHomePanel(true); };
     m_home_panel = new HomePanel(m_main_panel, homeCallbacks);
+    if (!m_gamepad_nav)
+        m_gamepad_nav = new GamepadNavigator(this);
     sizer->Insert(0, m_home_panel, 1, wxEXPAND);
     ShowHomePanel(false);
 
