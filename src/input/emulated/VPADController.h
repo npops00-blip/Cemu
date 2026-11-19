@@ -61,6 +61,7 @@ public:
 	uint32 get_emulated_button_flag(uint32 id) const override;
 
 	glm::vec2 get_axis() const override;
+	uint32 fov_menu_bits() const override;
 	glm::vec2 get_rotation() const override;
 	glm::vec2 get_trigger() const override;
 

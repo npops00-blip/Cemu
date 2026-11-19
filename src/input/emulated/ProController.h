@@ -62,6 +62,7 @@ public:
 	static std::string_view get_button_name(ButtonId id);
 
 	bool is_start_down() const override { return is_mapping_down(kButtonId_Plus); }
+	uint32 fov_menu_bits() const override;
 	bool is_left_down() const override { return is_mapping_down(kButtonId_Left); }
 	bool is_right_down() const override { return is_mapping_down(kButtonId_Right); }
 	bool is_up_down() const override { return is_mapping_down(kButtonId_Up); }

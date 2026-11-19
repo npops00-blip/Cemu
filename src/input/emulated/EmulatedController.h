@@ -49,6 +49,11 @@ public:
 	void controllers_update_states();
 
 	virtual glm::vec2 get_axis() const = 0;
+
+	// in-game FOV menu (see LatteFovMenu.h): raw menu bits of this controller, and feed helper.
+	// fov_menu_feed returns true if game input must be blocked this read
+	virtual uint32 fov_menu_bits() const { return 0; }
+	bool fov_menu_feed();
 	virtual glm::vec2 get_rotation() const = 0;
 	virtual glm::vec2 get_trigger() const = 0;
 

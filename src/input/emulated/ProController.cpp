@@ -1,6 +1,7 @@
 #include "input/emulated/ProController.h"
 
 #include "input/api/Controller.h"
+#include "Cafe/HW/Latte/Core/LatteFovMenu.h"
 #ifdef HAS_SDL
 #include "input/api/SDL/SDLController.h"
 #endif
@@ -273,4 +274,18 @@ bool ProController::set_default_mapping(const std::shared_ptr<ControllerBase>& c
 		});
 
 	return mapping_updated;
+}
+uint32 ProController::fov_menu_bits() const
+{
+	uint32 bits = 0;
+	const auto axis = get_axis();
+	if (is_mapping_down(kButtonId_StickL)) bits |= FovMenu::kL3;
+	if (is_mapping_down(kButtonId_StickR)) bits |= FovMenu::kR3;
+	if (is_mapping_down(kButtonId_Left) || axis.x < -0.6f) bits |= FovMenu::kLeft;
+	if (is_mapping_down(kButtonId_Right) || axis.x > 0.6f) bits |= FovMenu::kRight;
+	if (is_mapping_down(kButtonId_Up)) bits |= FovMenu::kUp;
+	if (is_mapping_down(kButtonId_Down)) bits |= FovMenu::kDown;
+	if (is_mapping_down(kButtonId_A)) bits |= FovMenu::kA;
+	if (is_mapping_down(kButtonId_B)) bits |= FovMenu::kB;
+	return bits;
 }

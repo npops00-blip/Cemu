@@ -1,6 +1,8 @@
 #include "input/emulated/EmulatedController.h"
 
 #include "input/api/Controller.h"
+#include "input/InputManager.h"
+#include "Cafe/HW/Latte/Core/LatteFovMenu.h"
 
 #if HAS_WIIMOTE
 #include "input/api/Wiimote/NativeWiimoteController.h"
@@ -343,4 +345,12 @@ bool EmulatedController::operator==(const EmulatedController& o) const
 bool EmulatedController::operator!=(const EmulatedController& o) const
 {
 	return !(*this == o);
+}
+
+bool EmulatedController::fov_menu_feed()
+{
+	// only the first configured controller drives the menu
+	if (InputManager::instance().get_controller(0).get() != this)
+		return false;
+	return FovMenu::FeedInput(fov_menu_bits());
 }

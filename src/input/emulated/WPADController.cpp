@@ -80,6 +80,10 @@ void WPADController::WPADRead(WPADStatus_t* status)
 
 	m_homebutton_down |= is_home_down();
 
+	const bool fovBlock = fov_menu_feed();
+	if (fovBlock)
+		button = 0;
+
 	// todo fill position api from wiimote
 
 	switch (m_data_format)
@@ -102,7 +106,7 @@ void WPADController::WPADRead(WPADStatus_t* status)
 		memset(ex_status, 0x00, sizeof(*ex_status));
 		ex_status->button = button;
 
-		auto axis = get_axis();
+		auto axis = fovBlock ? glm::vec2(0.0f) : get_axis();
 		axis *= 127.0f;
 		ex_status->fsStickX = (sint8)axis.x;
 		ex_status->fsStickY = (sint8)axis.y;
@@ -120,12 +124,12 @@ void WPADController::WPADRead(WPADStatus_t* status)
 		memset(ex_status, 0x00, sizeof(*ex_status));
 		ex_status->clButton = button;
 		
-		auto axis = get_axis();
+		auto axis = fovBlock ? glm::vec2(0.0f) : get_axis();
 		axis *= 2048.0f;
 		ex_status->clLStickX = (uint16)axis.x;
 		ex_status->clLStickY = (uint16)axis.y;
 
-		auto rotation = get_rotation();
+		auto rotation = fovBlock ? glm::vec2(0.0f) : get_rotation();
 		rotation *= 2048.0f;
 		ex_status->clRStickX = (uint16)rotation.x;
 		ex_status->clRStickY = (uint16)rotation.y;
@@ -159,12 +163,12 @@ void WPADController::WPADRead(WPADStatus_t* status)
 		ex_status->cable = TRUE;
 		ex_status->charge = TRUE;
 
-		auto axis = get_axis();
+		auto axis = fovBlock ? glm::vec2(0.0f) : get_axis();
 		axis *= 2048.0f;
 		ex_status->ucLStickX = (uint16)axis.x;
 		ex_status->ucLStickY = (uint16)axis.y;
 
-		auto rotation = get_rotation();
+		auto rotation = fovBlock ? glm::vec2(0.0f) : get_rotation();
 		rotation *= 2048.0f;
 		ex_status->ucRStickX = (uint16)rotation.x;
 		ex_status->ucRStickY = (uint16)rotation.y;
@@ -211,6 +215,10 @@ void WPADController::KPADRead(KPADStatus_t& status, const BtnRepeat& repeat)
 	}
 
 	m_homebutton_down |= is_home_down();
+
+	const bool fovBlock = fov_menu_feed();
+	if (fovBlock)
+		*hold = 0;
 	
 	// button repeat
 	const auto now = std::chrono::steady_clock::now();
@@ -232,8 +240,8 @@ void WPADController::KPADRead(KPADStatus_t& status, const BtnRepeat& repeat)
 	}
 
 	// axis
-	const auto axis = get_axis();
-	const auto rotation = get_rotation();
+	const auto axis = fovBlock ? glm::vec2(0.0f) : get_axis();
+	const auto rotation = fovBlock ? glm::vec2(0.0f) : get_rotation();
 
 	*release = m_last_holdvalue & ~*hold;
 	//status.release = m_last_holdvalue & ~*hold;
