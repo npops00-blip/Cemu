@@ -538,14 +538,16 @@ void HomePanel::RemoveBackground()
 // gamepad navigation (home: left/right + A, Start = play; graphic packs: up/down, left/right, A, B)
 void HomePanel::OnPadTimer(wxTimerEvent&)
 {
-	if (!IsShownOnScreen())
-		return;
 	auto* top = dynamic_cast<wxTopLevelWindow*>(wxGetTopLevelParent(this));
 	if (!top || !top->IsActive())
 	{
-		m_padPrev = 0;
+		m_padPrev = ~0u; // ignore buttons still held when the window becomes active again
 		return;
 	}
+	// game list is shown instead of the home screen: B goes back
+	const bool gameListMode = !IsShown() && GetParent() && GetParent()->IsShownOnScreen();
+	if (!IsShownOnScreen() && !gameListMode)
+		return;
 	enum : uint32 { kLeft = 1, kRight = 2, kA = 4, kStart = 8, kUp = 16, kDown = 32, kB = 64 };
 	uint32 state = 0;
 	auto& im = InputManager::instance();
@@ -567,6 +569,13 @@ void HomePanel::OnPadTimer(wxTimerEvent&)
 	const uint32 pressed = state & ~m_padPrev;
 	m_padPrev = state;
 	const wxLongLong now = wxGetLocalTimeMillis();
+
+	if (gameListMode)
+	{
+		if ((pressed & kB) && m_callbacks.showHome)
+			m_callbacks.showHome();
+		return;
+	}
 
 	// direction with auto-repeat: -1/+1 horizontal, -2/+2 vertical
 	int dir = 0;

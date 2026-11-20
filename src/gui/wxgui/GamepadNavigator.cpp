@@ -34,6 +34,32 @@ namespace
 		if (ctrl) key(VK_CONTROL, true);
 		SendInput(n, in, sizeof(INPUT));
 	}
+
+	bool IsComboDropped(HWND h)
+	{
+		if (!h)
+			return false;
+		wchar_t cls[32]{};
+		if (!GetClassNameW(h, cls, 32))
+			return false;
+		if (_wcsicmp(cls, L"ComboBox") != 0 && _wcsicmp(cls, L"ComboBoxEx32") != 0)
+			return false;
+		return SendMessageW(h, CB_GETDROPPEDSTATE, 0, 0) != 0;
+	}
+
+	bool IsDropDownOpen()
+	{
+		HWND focus = GetFocus();
+		for (HWND h = focus; h; h = GetParent(h))
+		{
+			if (IsComboDropped(h))
+				return true;
+		}
+		GUITHREADINFO gti{ sizeof(GUITHREADINFO) };
+		if (GetGUIThreadInfo(0, &gti) && (gti.flags & GUI_INMENUMODE))
+			return true;
+		return false;
+	}
 #endif
 }
 
@@ -105,6 +131,19 @@ void GamepadNavigator::OnTimer(wxTimerEvent&)
 	if (fire & FovMenu::kRB) SendKey(VK_TAB);
 	if (fire & FovMenu::kA) SendKey(VK_SPACE);
 	if (fire & FovMenu::kStart) SendKey(VK_RETURN);
-	if (fire & FovMenu::kB) SendKey(VK_ESCAPE);
+	if (fire & FovMenu::kB)
+	{
+		// B closes an open drop-down list first; otherwise it closes the window itself.
+		// (Escape alone does not close dialogs without a Cancel button, e.g. General settings.)
+		if (IsDropDownOpen())
+			SendKey(VK_ESCAPE);
+		else if (auto* tlw = dynamic_cast<wxTopLevelWindow*>(top))
+		{
+			m_prev = bits;
+			tlw->Close();
+		}
+		else
+			SendKey(VK_ESCAPE);
+	}
 #endif
 }

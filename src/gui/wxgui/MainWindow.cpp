@@ -421,6 +421,7 @@ void MainWindow::CreateGameListAndStatusBar()
     };
     homeCallbacks.openSettings = [this]() { OpenSettings(); };
     homeCallbacks.showGameList = [this]() { ShowHomePanel(false); };
+    homeCallbacks.showHome = [this]() { ShowHomePanel(true); };
     homeCallbacks.gameFound = [this]() { ShowHomePanel(true); };
     m_home_panel = new HomePanel(m_main_panel, homeCallbacks);
     if (!m_gamepad_nav)

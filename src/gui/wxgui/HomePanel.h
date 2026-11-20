@@ -21,6 +21,7 @@ public:
 		std::function<void()> openGraphicPacks;
 		std::function<void()> openSettings;
 		std::function<void()> showGameList;
+		std::function<void()> showHome; // back from the game list
 		std::function<void()> gameFound; // called once when BotW appears in the title list
 	};
 

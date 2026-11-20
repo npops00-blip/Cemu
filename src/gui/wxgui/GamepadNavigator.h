@@ -6,7 +6,7 @@
 // by translating controller buttons into keyboard navigation for the active window:
 //   D-pad          -> arrow keys        LB / RB -> Shift+Tab / Tab (previous / next control)
 //   A              -> Space             Start   -> Enter
-//   B              -> Escape
+//   B              -> close drop-down / close the window
 // The main window (home screen / game) is left alone; it handles the gamepad itself.
 class GamepadNavigator : public wxEvtHandler
 {
