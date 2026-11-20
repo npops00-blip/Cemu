@@ -9,6 +9,7 @@
 #include "input/InputManager.h"
 #include "Cafe/GraphicPack/GraphicPack2.h"
 #include "config/CemuConfig.h"
+#include "wxgui/wxCemuConfig.h"
 
 #include <wx/dcbuffer.h>
 #include <wx/graphics.h>
@@ -57,7 +58,7 @@ HomePanel::HomePanel(wxWindow* parent, Callbacks callbacks)
 	m_buttons.push_back({ U8("\xD0\x98\xD0\xB3\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C"), "Enter", {}, true, [this]() { LaunchGame(); } });
 	m_buttons.push_back({ U8("\xD0\x93\xD1\x80\xD0\xB0\xD1\x84\xD0\xBF\xD0\xB0\xD0\xBA\xD0\xB8"), "G", {}, false, [this]() { ShowPacks(); } });
 	m_buttons.push_back({ U8("\xD0\x9C\xD0\xBE\xD0\xB4\xD1\x8B (UKMM)"), "M", {}, false, [this]() { OpenModManager(); } });
-	m_buttons.push_back({ U8("\xD0\x9D\xD0\xB0\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB9\xD0\xBA\xD0\xB8"), "S", {}, false, [this]() { if (m_callbacks.openSettings) m_callbacks.openSettings(); } });
+	m_buttons.push_back({ U8("\xD0\x9D\xD0\xB0\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB9\xD0\xBA\xD0\xB8"), "S", {}, false, [this]() { ShowSettings(); } });
 	m_buttons.push_back({ U8("\xD0\xA1\xD0\xBF\xD0\xB8\xD1\x81\xD0\xBE\xD0\xBA \xD0\xB8\xD0\xB3\xD1\x80"), "L", {}, false, [this]() { if (m_callbacks.showGameList) m_callbacks.showGameList(); } });
 
 	Bind(wxEVT_PAINT, &HomePanel::OnPaint, this);
@@ -70,9 +71,14 @@ HomePanel::HomePanel(wxWindow* parent, Callbacks callbacks)
 	Bind(wxEVT_TIMER, &HomePanel::OnPadTimer, this, m_padTimer.GetId());
 	Bind(wxEVT_RIGHT_UP, &HomePanel::OnRightUp, this);
 	Bind(wxEVT_MOUSEWHEEL, [this](wxMouseEvent& e) {
+		const int steps = e.GetWheelRotation() / std::max(1, e.GetWheelDelta());
+		if (m_mode == Mode::Settings)
+		{
+			SettingsMove(-steps);
+			return;
+		}
 		if (m_mode != Mode::Packs || m_packRows.empty())
 			return;
-		const int steps = e.GetWheelRotation() / std::max(1, e.GetWheelDelta());
 		m_packScroll = std::max(0, m_packScroll - steps * 3);
 		m_packSel = std::clamp(m_packSel - steps * 3, 0, (int)m_packRows.size() - 1);
 		Refresh(false);
@@ -226,6 +232,11 @@ void HomePanel::OnPaint(wxPaintEvent&)
 		PaintPacks(gc.get(), w, h, left);
 		return;
 	}
+	if (m_mode == Mode::Settings)
+	{
+		PaintSettings(gc.get(), w, h, left);
+		return;
+	}
 
 	if (!m_titleId)
 	{
@@ -314,7 +325,7 @@ void HomePanel::OnPaint(wxPaintEvent&)
 
 void HomePanel::OnMouseMove(wxMouseEvent& event)
 {
-	if (m_mode == Mode::Packs)
+	if (m_mode != Mode::Home)
 		return;
 	int hover = -1;
 	for (size_t i = 0; i < m_buttons.size(); i++)
@@ -340,6 +351,22 @@ void HomePanel::OnMouseLeave(wxMouseEvent&)
 void HomePanel::OnLeftUp(wxMouseEvent& event)
 {
 	SetFocus();
+	if (m_mode == Mode::Settings)
+	{
+		for (size_t i = 0; i < m_setRows.size(); i++)
+		{
+			const auto& r = m_setRows[i];
+			if (r.kind == SettingRow::Header || !r.rect.Contains(event.GetPosition()))
+				continue;
+			m_setSel = (int)i;
+			if (r.kind == SettingRow::Choice)
+				SettingsCycle(event.GetPosition().x > r.rect.GetX() + r.rect.GetWidth() / 2 ? 1 : -1);
+			else
+				SettingsActivate();
+			return;
+		}
+		return;
+	}
 	if (m_mode == Mode::Packs)
 	{
 		for (size_t i = 0; i < m_packRows.size(); i++)
@@ -363,6 +390,19 @@ void HomePanel::OnLeftUp(wxMouseEvent& event)
 
 void HomePanel::OnKeyDown(wxKeyEvent& event)
 {
+	if (m_mode == Mode::Settings)
+	{
+		switch (event.GetKeyCode())
+		{
+		case WXK_UP: SettingsMove(-1); return;
+		case WXK_DOWN: SettingsMove(1); return;
+		case WXK_LEFT: SettingsCycle(-1); return;
+		case WXK_RIGHT: SettingsCycle(1); return;
+		case WXK_RETURN: case WXK_NUMPAD_ENTER: case WXK_SPACE: SettingsActivate(); return;
+		case WXK_ESCAPE: case WXK_BACK: LeaveSettings(); return;
+		default: event.Skip(); return;
+		}
+	}
 	if (m_mode == Mode::Packs)
 	{
 		switch (event.GetKeyCode())
@@ -591,6 +631,22 @@ void HomePanel::OnPadTimer(wxTimerEvent&)
 		m_padRepeatAt = now + 130;
 	}
 
+	if (m_mode == Mode::Settings)
+	{
+		SetFocus();
+		if (dir == -2 || dir == 2)
+			SettingsMove(dir / 2);
+		else if (dir)
+			SettingsCycle(dir);
+		if (pressed & kA)
+		{
+			m_padPrev = ~0u; // the full settings dialog may open; ignore held buttons afterwards
+			SettingsActivate();
+		}
+		else if (pressed & kB)
+			LeaveSettings();
+		return;
+	}
 	if (m_mode == Mode::Packs)
 	{
 		SetFocus();
@@ -863,6 +919,338 @@ void HomePanel::PaintPacks(wxGraphicsContext* gc, double w, double h, double lef
 	gc->DrawRectangle(0, h - barH, w, barH);
 	gc->SetFont(MakeFont(10), kCaption);
 	const wxString hint = U8("\xE2\x86\x91 \xE2\x86\x93 \xE2\x80\x94 \xD0\xB2\xD1\x8B\xD0\xB1\xD0\xBE\xD1\x80     \xE2\x86\x90 \xE2\x86\x92 \xE2\x80\x94 \xD0\xBF\xD1\x80\xD0\xB5\xD1\x81\xD0\xB5\xD1\x82 / \xD0\xB2\xD0\xBA\xD0\xBB-\xD0\xB2\xD1\x8B\xD0\xBA\xD0\xBB     A / Enter \xE2\x80\x94 \xD0\xBF\xD0\xB5\xD1\x80\xD0\xB5\xD0\xBA\xD0\xBB\xD1\x8E\xD1\x87\xD0\xB8\xD1\x82\xD1\x8C     B / Esc \xE2\x80\x94 \xD0\xBD\xD0\xB0\xD0\xB7\xD0\xB0\xD0\xB4");
+	double hw, hh;
+	gc->GetTextExtent(hint, &hw, &hh);
+	gc->DrawText(hint, w - left - hw, h - barH + (barH - hh) / 2);
+}
+
+// ---------------------------------------------------------------- settings screen
+
+namespace
+{
+	std::vector<wxString> PositionNames()
+	{
+		return { U8("\xD0\x92\xD1\x8B\xD0\xBA\xD0\xBB"), U8("\xD0\xA1\xD0\xB2\xD0\xB5\xD1\x80\xD1\x85\xD1\x83 \xD1\x81\xD0\xBB\xD0\xB5\xD0\xB2\xD0\xB0"), U8("\xD0\xA1\xD0\xB2\xD0\xB5\xD1\x80\xD1\x85\xD1\x83 \xD0\xBF\xD0\xBE \xD1\x86\xD0\xB5\xD0\xBD\xD1\x82\xD1\x80\xD1\x83"), U8("\xD0\xA1\xD0\xB2\xD0\xB5\xD1\x80\xD1\x85\xD1\x83 \xD1\x81\xD0\xBF\xD1\x80\xD0\xB0\xD0\xB2\xD0\xB0"), U8("\xD0\xA1\xD0\xBD\xD0\xB8\xD0\xB7\xD1\x83 \xD1\x81\xD0\xBB\xD0\xB5\xD0\xB2\xD0\xB0"), U8("\xD0\xA1\xD0\xBD\xD0\xB8\xD0\xB7\xD1\x83 \xD0\xBF\xD0\xBE \xD1\x86\xD0\xB5\xD0\xBD\xD1\x82\xD1\x80\xD1\x83"), U8("\xD0\xA1\xD0\xBD\xD0\xB8\xD0\xB7\xD1\x83 \xD1\x81\xD0\xBF\xD1\x80\xD0\xB0\xD0\xB2\xD0\xB0") };
+	}
+	std::vector<wxString> FilterNames()
+	{
+		return { U8("\xD0\x91\xD0\xB8\xD0\xBB\xD0\xB8\xD0\xBD\xD0\xB5\xD0\xB9\xD0\xBD\xD1\x8B\xD0\xB9"), U8("\xD0\x91\xD0\xB8\xD0\xBA\xD1\x83\xD0\xB1\xD0\xB8\xD1\x87\xD0\xB5\xD1\x81\xD0\xBA\xD0\xB8\xD0\xB9"), U8("\xD0\x91\xD0\xB8\xD0\xBA\xD1\x83\xD0\xB1\xD0\xB8\xD1\x87\xD0\xB5\xD1\x81\xD0\xBA\xD0\xB8\xD0\xB9 (\xD0\xAD\xD1\x80\xD0\xBC\xD0\xB8\xD1\x82)"), U8("\xD0\x91\xD0\xBB\xD0\xB8\xD0\xB6\xD0\xB0\xD0\xB9\xD1\x88\xD0\xB8\xD0\xB9 \xD1\x81\xD0\xBE\xD1\x81\xD0\xB5\xD0\xB4") };
+	}
+	std::vector<wxString> VolumeNames()
+	{
+		std::vector<wxString> v;
+		for (int i = 0; i <= 100; i += 5)
+			v.push_back(wxString::Format("%d%%", i));
+		return v;
+	}
+}
+
+void HomePanel::ShowSettings()
+{
+	m_mode = Mode::Settings;
+	m_setSel = 0;
+	m_setScroll = 0;
+	m_setDirty = false;
+	m_hover = -1;
+	SetCursor(wxNullCursor);
+	BuildSettingRows();
+	SettingsMove(0);
+	SetFocus();
+	Refresh(false);
+}
+
+void HomePanel::LeaveSettings()
+{
+	if (m_setDirty)
+		GetConfigHandle().Save();
+	m_mode = Mode::Home;
+	m_status = m_setDirty ? U8("\xD0\x9D\xD0\xB0\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB9\xD0\xBA\xD0\xB8 \xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBD\xD1\x8B.") : wxString();
+	m_setDirty = false;
+	Refresh(false);
+}
+
+void HomePanel::BuildSettingRows()
+{
+	m_setRows.clear();
+	auto header = [this](const wxString& label) {
+		SettingRow r;
+		r.kind = SettingRow::Header;
+		r.label = label;
+		m_setRows.push_back(std::move(r));
+	};
+	auto toggle = [this](const wxString& label, std::function<bool()> get, std::function<void(bool)> set, const wxString& hint = {}) {
+		SettingRow r;
+		r.kind = SettingRow::Toggle;
+		r.label = label;
+		r.hint = hint;
+		r.getBool = std::move(get);
+		r.setBool = std::move(set);
+		m_setRows.push_back(std::move(r));
+	};
+	auto choice = [this](const wxString& label, std::vector<wxString> options, std::function<int()> get, std::function<void(int)> set, bool wrap = true, const wxString& hint = {}) {
+		SettingRow r;
+		r.kind = SettingRow::Choice;
+		r.label = label;
+		r.hint = hint;
+		r.options = std::move(options);
+		r.getIndex = std::move(get);
+		r.setIndex = std::move(set);
+		r.wrap = wrap;
+		m_setRows.push_back(std::move(r));
+	};
+
+	auto& cfg = GetConfig();
+	const bool vulkan = cfg.graphic_api.GetValue() == GraphicAPI::kVulkan;
+
+	header(U8("\xD0\x93\xD1\x80\xD0\xB0\xD1\x84\xD0\xB8\xD0\xBA\xD0\xB0"));
+	choice(U8("\xD0\x93\xD1\x80\xD0\xB0\xD1\x84\xD0\xB8\xD1\x87\xD0\xB5\xD1\x81\xD0\xBA\xD0\xB8\xD0\xB9 API"), { "OpenGL", "Vulkan" },
+		[]() { return GetConfig().graphic_api.GetValue() == GraphicAPI::kVulkan ? 1 : 0; },
+		[this](int i) {
+			GetConfig().graphic_api = i == 1 ? GraphicAPI::kVulkan : GraphicAPI::kOpenGL;
+			if (i == 0 && GetConfig().vsync.GetValue() > 1)
+				GetConfig().vsync = 1;
+			CallAfter([this]() { BuildSettingRows(); Refresh(false); });
+		}, true, U8("\xD0\x9F\xD1\x80\xD0\xB8\xD0\xBC\xD0\xB5\xD0\xBD\xD0\xB8\xD1\x82\xD1\x81\xD1\x8F \xD0\xBF\xD1\x80\xD0\xB8 \xD1\x81\xD0\xBB\xD0\xB5\xD0\xB4\xD1\x83\xD1\x8E\xD1\x89\xD0\xB5\xD0\xBC \xD0\xB7\xD0\xB0\xD0\xBF\xD1\x83\xD1\x81\xD0\xBA\xD0\xB5 \xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B"));
+	if (vulkan)
+		choice(U8("\xD0\x92\xD0\xB5\xD1\x80\xD1\x82\xD0\xB8\xD0\xBA\xD0\xB0\xD0\xBB\xD1\x8C\xD0\xBD\xD0\xB0\xD1\x8F \xD1\x81\xD0\xB8\xD0\xBD\xD1\x85\xD1\x80\xD0\xBE\xD0\xBD\xD0\xB8\xD0\xB7\xD0\xB0\xD1\x86\xD0\xB8\xD1\x8F"), { U8("\xD0\x92\xD1\x8B\xD0\xBA\xD0\xBB"), U8("\xD0\x94\xD0\xB2\xD0\xBE\xD0\xB9\xD0\xBD\xD0\xB0\xD1\x8F \xD0\xB1\xD1\x83\xD1\x84\xD0\xB5\xD1\x80\xD0\xB8\xD0\xB7\xD0\xB0\xD1\x86\xD0\xB8\xD1\x8F"), U8("\xD0\xA2\xD1\x80\xD0\xBE\xD0\xB9\xD0\xBD\xD0\xB0\xD1\x8F \xD0\xB1\xD1\x83\xD1\x84\xD0\xB5\xD1\x80\xD0\xB8\xD0\xB7\xD0\xB0\xD1\x86\xD0\xB8\xD1\x8F"), U8("\xD0\x9A\xD0\xB0\xD0\xBA \xD1\x83 \xD1\x8D\xD0\xBC\xD1\x83\xD0\xBB\xD0\xB8\xD1\x80\xD1\x83\xD0\xB5\xD0\xBC\xD0\xBE\xD0\xB3\xD0\xBE \xD1\x8D\xD0\xBA\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB0") },
+			[]() { return std::clamp(GetConfig().vsync.GetValue(), 0, 3); }, [](int i) { GetConfig().vsync = i; });
+	else
+		choice(U8("\xD0\x92\xD0\xB5\xD1\x80\xD1\x82\xD0\xB8\xD0\xBA\xD0\xB0\xD0\xBB\xD1\x8C\xD0\xBD\xD0\xB0\xD1\x8F \xD1\x81\xD0\xB8\xD0\xBD\xD1\x85\xD1\x80\xD0\xBE\xD0\xBD\xD0\xB8\xD0\xB7\xD0\xB0\xD1\x86\xD0\xB8\xD1\x8F"), { U8("\xD0\x92\xD1\x8B\xD0\xBA\xD0\xBB"), U8("\xD0\x92\xD0\xBA\xD0\xBB") },
+			[]() { return GetConfig().vsync.GetValue() ? 1 : 0; }, [](int i) { GetConfig().vsync = i; });
+	if (vulkan)
+		toggle(U8("\xD0\x90\xD1\x81\xD0\xB8\xD0\xBD\xD1\x85\xD1\x80\xD0\xBE\xD0\xBD\xD0\xBD\xD0\xB0\xD1\x8F \xD0\xBA\xD0\xBE\xD0\xBC\xD0\xBF\xD0\xB8\xD0\xBB\xD1\x8F\xD1\x86\xD0\xB8\xD1\x8F \xD1\x88\xD0\xB5\xD0\xB9\xD0\xB4\xD0\xB5\xD1\x80\xD0\xBE\xD0\xB2"), []() { return GetConfig().async_compile.GetValue(); }, [](bool v) { GetConfig().async_compile = v; },
+			U8("\xD0\x9C\xD0\xB5\xD0\xBD\xD1\x8C\xD1\x88\xD0\xB5 \xD0\xBF\xD0\xBE\xD0\xB4\xD1\x82\xD0\xBE\xD1\x80\xD0\xBC\xD0\xB0\xD0\xB6\xD0\xB8\xD0\xB2\xD0\xB0\xD0\xBD\xD0\xB8\xD0\xB9 \xD0\xBF\xD1\x80\xD0\xB8 \xD0\xBF\xD0\xBE\xD1\x8F\xD0\xB2\xD0\xBB\xD0\xB5\xD0\xBD\xD0\xB8\xD0\xB8 \xD0\xBD\xD0\xBE\xD0\xB2\xD1\x8B\xD1\x85 \xD1\x8D\xD1\x84\xD1\x84\xD0\xB5\xD0\xBA\xD1\x82\xD0\xBE\xD0\xB2"));
+	choice(U8("\xD0\xA4\xD0\xB8\xD0\xBB\xD1\x8C\xD1\x82\xD1\x80 \xD1\x83\xD0\xB2\xD0\xB5\xD0\xBB\xD0\xB8\xD1\x87\xD0\xB5\xD0\xBD\xD0\xB8\xD1\x8F"), FilterNames(), []() { return std::clamp((int)GetConfig().upscale_filter.GetValue(), 0, 3); }, [](int i) { GetConfig().upscale_filter = i; });
+	choice(U8("\xD0\xA4\xD0\xB8\xD0\xBB\xD1\x8C\xD1\x82\xD1\x80 \xD1\x83\xD0\xBC\xD0\xB5\xD0\xBD\xD1\x8C\xD1\x88\xD0\xB5\xD0\xBD\xD0\xB8\xD1\x8F"), FilterNames(), []() { return std::clamp((int)GetConfig().downscale_filter.GetValue(), 0, 3); }, [](int i) { GetConfig().downscale_filter = i; });
+	choice(U8("\xD0\x9C\xD0\xB0\xD1\x81\xD1\x88\xD1\x82\xD0\xB0\xD0\xB1 \xD0\xBD\xD0\xB0 \xD0\xB2\xD0\xB5\xD1\x81\xD1\x8C \xD1\x8D\xD0\xBA\xD1\x80\xD0\xB0\xD0\xBD"), { U8("\xD0\xA1\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD1\x8F\xD1\x82\xD1\x8C \xD0\xBF\xD1\x80\xD0\xBE\xD0\xBF\xD0\xBE\xD1\x80\xD1\x86\xD0\xB8\xD0\xB8"), U8("\xD0\xA0\xD0\xB0\xD1\x81\xD1\x82\xD1\x8F\xD0\xBD\xD1\x83\xD1\x82\xD1\x8C") },
+		[]() { return GetConfig().fullscreen_scaling.GetValue() == kStretch ? 1 : 0; }, [](int i) { GetConfig().fullscreen_scaling = i == 1 ? kStretch : kKeepAspectRatio; });
+	toggle(U8("\xD0\x97\xD0\xB0\xD0\xBF\xD1\x83\xD1\x81\xD0\xBA\xD0\xB0\xD1\x82\xD1\x8C \xD0\xB8\xD0\xB3\xD1\x80\xD1\x83 \xD0\xBD\xD0\xB0 \xD0\xB2\xD0\xB5\xD1\x81\xD1\x8C \xD1\x8D\xD0\xBA\xD1\x80\xD0\xB0\xD0\xBD"), []() { return GetWxGUIConfig().fullscreen.GetValue(); }, [](bool v) { GetWxGUIConfig().fullscreen = v; });
+
+	header(U8("\xD0\x97\xD0\xB2\xD1\x83\xD0\xBA"));
+	choice(U8("\xD0\x93\xD1\x80\xD0\xBE\xD0\xBC\xD0\xBA\xD0\xBE\xD1\x81\xD1\x82\xD1\x8C (\xD0\xA2\xD0\x92)"), VolumeNames(), []() { return std::clamp(GetConfig().tv_volume / 5, 0, 20); }, [](int i) { GetConfig().tv_volume = i * 5; }, false);
+	choice(U8("\xD0\x93\xD1\x80\xD0\xBE\xD0\xBC\xD0\xBA\xD0\xBE\xD1\x81\xD1\x82\xD1\x8C (\xD0\xB3\xD0\xB5\xD0\xB9\xD0\xBC\xD0\xBF\xD0\xB0\xD0\xB4)"), VolumeNames(), []() { return std::clamp(GetConfig().pad_volume / 5, 0, 20); }, [](int i) { GetConfig().pad_volume = i * 5; }, false);
+
+	header(U8("\xD0\xAD\xD0\xBA\xD1\x80\xD0\xB0\xD0\xBD\xD0\xBD\xD1\x8B\xD0\xB9 \xD0\xBE\xD0\xB2\xD0\xB5\xD1\x80\xD0\xBB\xD0\xB5\xD0\xB9"));
+	choice(U8("\xD0\x9F\xD0\xBE\xD0\xBB\xD0\xBE\xD0\xB6\xD0\xB5\xD0\xBD\xD0\xB8\xD0\xB5 \xD0\xBE\xD0\xB2\xD0\xB5\xD1\x80\xD0\xBB\xD0\xB5\xD1\x8F"), PositionNames(), []() { return std::clamp((int)GetConfig().overlay.position, 0, 6); }, [](int i) { GetConfig().overlay.position = (ScreenPosition)i; });
+	toggle(U8("\xD0\x9F\xD0\xBE\xD0\xBA\xD0\xB0\xD0\xB7\xD1\x8B\xD0\xB2\xD0\xB0\xD1\x82\xD1\x8C FPS"), []() { return GetConfig().overlay.fps; }, [](bool v) { GetConfig().overlay.fps = v; });
+	toggle(U8("\xD0\x97\xD0\xB0\xD0\xB3\xD1\x80\xD1\x83\xD0\xB7\xD0\xBA\xD0\xB0 \xD0\xBF\xD1\x80\xD0\xBE\xD1\x86\xD0\xB5\xD1\x81\xD1\x81\xD0\xBE\xD1\x80\xD0\xB0"), []() { return GetConfig().overlay.cpu_usage; }, [](bool v) { GetConfig().overlay.cpu_usage = v; });
+	toggle(U8("\xD0\x98\xD1\x81\xD0\xBF\xD0\xBE\xD0\xBB\xD1\x8C\xD0\xB7\xD0\xBE\xD0\xB2\xD0\xB0\xD0\xBD\xD0\xB8\xD0\xB5 RAM"), []() { return GetConfig().overlay.ram_usage; }, [](bool v) { GetConfig().overlay.ram_usage = v; });
+	toggle(U8("\xD0\x98\xD1\x81\xD0\xBF\xD0\xBE\xD0\xBB\xD1\x8C\xD0\xB7\xD0\xBE\xD0\xB2\xD0\xB0\xD0\xBD\xD0\xB8\xD0\xB5 \xD0\xB2\xD0\xB8\xD0\xB4\xD0\xB5\xD0\xBE\xD0\xBF\xD0\xB0\xD0\xBC\xD1\x8F\xD1\x82\xD0\xB8"), []() { return GetConfig().overlay.vram_usage; }, [](bool v) { GetConfig().overlay.vram_usage = v; });
+	choice(U8("\xD0\x9F\xD0\xBE\xD0\xBB\xD0\xBE\xD0\xB6\xD0\xB5\xD0\xBD\xD0\xB8\xD0\xB5 \xD1\x83\xD0\xB2\xD0\xB5\xD0\xB4\xD0\xBE\xD0\xBC\xD0\xBB\xD0\xB5\xD0\xBD\xD0\xB8\xD0\xB9"), PositionNames(), []() { return std::clamp((int)GetConfig().notification.position, 0, 6); }, [](int i) { GetConfig().notification.position = (ScreenPosition)i; });
+
+	header(U8("\xD0\xA1\xD0\xB8\xD1\x81\xD1\x82\xD0\xB5\xD0\xBC\xD0\xB0"));
+	{
+		static const CPUMode modes[] = { CPUMode::Auto, CPUMode::MulticoreRecompiler, CPUMode::SinglecoreRecompiler, CPUMode::SinglecoreInterpreter };
+		choice(U8("\xD0\xA0\xD0\xB5\xD0\xB6\xD0\xB8\xD0\xBC \xD0\xBF\xD1\x80\xD0\xBE\xD1\x86\xD0\xB5\xD1\x81\xD1\x81\xD0\xBE\xD1\x80\xD0\xB0"), { U8("\xD0\x90\xD0\xB2\xD1\x82\xD0\xBE"), U8("\xD0\x9C\xD0\xBD\xD0\xBE\xD0\xB3\xD0\xBE\xD1\x8F\xD0\xB4\xD0\xB5\xD1\x80\xD0\xBD\xD1\x8B\xD0\xB9 \xD1\x80\xD0\xB5\xD0\xBA\xD0\xBE\xD0\xBC\xD0\xBF\xD0\xB8\xD0\xBB\xD1\x8F\xD1\x82\xD0\xBE\xD1\x80"), U8("\xD0\x9E\xD0\xB4\xD0\xBD\xD0\xBE\xD1\x8F\xD0\xB4\xD0\xB5\xD1\x80\xD0\xBD\xD1\x8B\xD0\xB9 \xD1\x80\xD0\xB5\xD0\xBA\xD0\xBE\xD0\xBC\xD0\xBF\xD0\xB8\xD0\xBB\xD1\x8F\xD1\x82\xD0\xBE\xD1\x80"), U8("\xD0\x9E\xD0\xB4\xD0\xBD\xD0\xBE\xD1\x8F\xD0\xB4\xD0\xB5\xD1\x80\xD0\xBD\xD1\x8B\xD0\xB9 \xD0\xB8\xD0\xBD\xD1\x82\xD0\xB5\xD1\x80\xD0\xBF\xD1\x80\xD0\xB5\xD1\x82\xD0\xB0\xD1\x82\xD0\xBE\xD1\x80") },
+			[]() {
+				const CPUMode m = GetConfig().cpu_mode.GetValue();
+				for (int i = 0; i < 4; i++)
+					if (modes[i] == m)
+						return i;
+				return 0;
+			},
+			[](int i) { GetConfig().cpu_mode = modes[std::clamp(i, 0, 3)]; });
+	}
+	toggle(U8("\xD0\x97\xD0\xB2\xD1\x83\xD0\xBA \xD0\xBF\xD1\x80\xD0\xB8 \xD0\xB7\xD0\xB0\xD0\xBF\xD1\x83\xD1\x81\xD0\xBA\xD0\xB5 \xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B"), []() { return GetConfig().play_boot_sound.GetValue(); }, [](bool v) { GetConfig().play_boot_sound = v; });
+	toggle(U8("\xD0\xA1\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD1\x8F\xD1\x82\xD1\x8C \xD1\x81\xD0\xBA\xD1\x80\xD0\xB8\xD0\xBD\xD1\x88\xD0\xBE\xD1\x82\xD1\x8B \xD0\xB2 \xD1\x84\xD0\xB0\xD0\xB9\xD0\xBB"), []() { return GetWxGUIConfig().save_screenshot.GetValue(); }, [](bool v) { GetWxGUIConfig().save_screenshot = v; });
+
+	{
+		SettingRow r;
+		r.kind = SettingRow::Action;
+		r.label = U8("\xD0\x92\xD1\x81\xD0\xB5 \xD0\xBD\xD0\xB0\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB9\xD0\xBA\xD0\xB8 Cemu\xE2\x80\xA6");
+		r.hint = U8("\xD0\xA1\xD1\x82\xD0\xB0\xD0\xBD\xD0\xB4\xD0\xB0\xD1\x80\xD1\x82\xD0\xBD\xD0\xBE\xD0\xB5 \xD0\xBE\xD0\xBA\xD0\xBD\xD0\xBE \xD1\x81\xD0\xBE \xD0\xB2\xD1\x81\xD0\xB5\xD0\xBC\xD0\xB8 \xD0\xBF\xD0\xB0\xD1\x80\xD0\xB0\xD0\xBC\xD0\xB5\xD1\x82\xD1\x80\xD0\xB0\xD0\xBC\xD0\xB8");
+		r.action = [this]() {
+			if (m_setDirty)
+				GetConfigHandle().Save();
+			if (m_callbacks.openSettings)
+				m_callbacks.openSettings();
+			BuildSettingRows();
+			Refresh(false);
+		};
+		m_setRows.push_back(std::move(r));
+	}
+	if (m_setSel >= (int)m_setRows.size())
+		m_setSel = (int)m_setRows.size() - 1;
+}
+
+void HomePanel::SettingsMove(int delta)
+{
+	if (m_setRows.empty())
+		return;
+	int i = std::clamp(m_setSel + delta, 0, (int)m_setRows.size() - 1);
+	const int step = delta < 0 ? -1 : 1;
+	while (i >= 0 && i < (int)m_setRows.size() && m_setRows[i].kind == SettingRow::Header)
+		i += step;
+	if (i < 0 || i >= (int)m_setRows.size())
+	{
+		// ran past the end: search the other way
+		i = std::clamp(m_setSel, 0, (int)m_setRows.size() - 1);
+		while (i < (int)m_setRows.size() && m_setRows[i].kind == SettingRow::Header)
+			i++;
+	}
+	m_setSel = std::clamp(i, 0, (int)m_setRows.size() - 1);
+	Refresh(false);
+}
+
+void HomePanel::SettingsActivate()
+{
+	if (m_setSel < 0 || m_setSel >= (int)m_setRows.size())
+		return;
+	auto& r = m_setRows[m_setSel];
+	switch (r.kind)
+	{
+	case SettingRow::Toggle:
+		r.setBool(!r.getBool());
+		m_setDirty = true;
+		Refresh(false);
+		break;
+	case SettingRow::Choice:
+		SettingsCycle(1);
+		break;
+	case SettingRow::Action:
+	{
+		auto action = r.action; // rows are rebuilt inside
+		action();
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+void HomePanel::SettingsCycle(int dir)
+{
+	if (m_setSel < 0 || m_setSel >= (int)m_setRows.size())
+		return;
+	auto& r = m_setRows[m_setSel];
+	if (r.kind == SettingRow::Toggle)
+	{
+		const bool want = dir > 0;
+		if (r.getBool() != want)
+		{
+			r.setBool(want);
+			m_setDirty = true;
+		}
+		Refresh(false);
+		return;
+	}
+	if (r.kind != SettingRow::Choice || r.options.empty())
+		return;
+	const int n = (int)r.options.size();
+	int idx = r.getIndex() + dir;
+	if (r.wrap)
+		idx = (idx % n + n) % n;
+	else
+		idx = std::clamp(idx, 0, n - 1);
+	r.setIndex(idx);
+	m_setDirty = true;
+	Refresh(false);
+}
+
+void HomePanel::PaintSettings(wxGraphicsContext* gc, double w, double h, double left)
+{
+	gc->SetPen(*wxTRANSPARENT_PEN);
+	gc->SetBrush(wxBrush(wxColour(6, 14, 16, 150)));
+	gc->DrawRectangle(0, 0, w, h);
+
+	double y = 70;
+	gc->SetFont(MakeFont(26, true), kText);
+	gc->DrawText(U8("\xD0\x9D\xD0\xB0\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB9\xD0\xBA\xD0\xB8"), left, y);
+	y += 52;
+	gc->SetFont(MakeFont(11), kCaption);
+	const wxString sub = (m_setSel >= 0 && m_setSel < (int)m_setRows.size() && !m_setRows[m_setSel].hint.empty())
+		? m_setRows[m_setSel].hint : U8("\xD0\x9E\xD1\x81\xD0\xBD\xD0\xBE\xD0\xB2\xD0\xBD\xD1\x8B\xD0\xB5 \xD0\xBF\xD0\xB0\xD1\x80\xD0\xB0\xD0\xBC\xD0\xB5\xD1\x82\xD1\x80\xD1\x8B. \xD0\xA1\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD1\x8F\xD1\x8E\xD1\x82\xD1\x81\xD1\x8F \xD0\xBF\xD1\x80\xD0\xB8 \xD0\xB2\xD1\x8B\xD1\x85\xD0\xBE\xD0\xB4\xD0\xB5 \xD1\x81 \xD1\x8D\xD1\x82\xD0\xBE\xD0\xB3\xD0\xBE \xD1\x8D\xD0\xBA\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB0.");
+	gc->DrawText(sub, left, y);
+	y += 36;
+
+	const double barH = 56;
+	const double rowH = 46, headH = 40, gap = 6;
+	const double listTop = y, listBottom = h - barH - 20;
+	const double listW = std::min(w - left * 2, 1100.0);
+	auto heightOf = [&](int i) { return (m_setRows[i].kind == SettingRow::Header ? headH : rowH) + gap; };
+
+	// keep the selection (and the header right above it) visible
+	if (m_setSel < m_setScroll)
+		m_setScroll = m_setSel;
+	if (m_setScroll > 0 && m_setScroll == m_setSel && m_setRows[m_setScroll - 1].kind == SettingRow::Header)
+		m_setScroll--;
+	for (;;)
+	{
+		double used = 0;
+		for (int i = m_setScroll; i <= m_setSel && i < (int)m_setRows.size(); i++)
+			used += heightOf(i);
+		if (used <= listBottom - listTop || m_setScroll >= m_setSel)
+			break;
+		m_setScroll++;
+	}
+	m_setScroll = std::clamp(m_setScroll, 0, std::max(0, (int)m_setRows.size() - 1));
+
+	for (auto& r : m_setRows)
+		r.rect = wxRect();
+	for (int i = m_setScroll; i < (int)m_setRows.size(); i++)
+	{
+		auto& r = m_setRows[i];
+		if (y + heightOf(i) - gap > listBottom)
+			break;
+		if (r.kind == SettingRow::Header)
+		{
+			gc->SetFont(MakeFont(10, true), kAccent);
+			double tw, th;
+			wxString t = r.label.Upper();
+			gc->GetTextExtent(t, &tw, &th);
+			gc->DrawText(t, left + 4, y + headH - th - 6);
+			y += headH + gap;
+			continue;
+		}
+		const wxRect rect((int)left, (int)y, (int)listW, (int)rowH);
+		r.rect = rect;
+		const bool sel = i == m_setSel;
+		gc->SetPen(sel ? wxPen(kAccent, 2) : *wxTRANSPARENT_PEN);
+		gc->SetBrush(wxBrush(sel ? wxColour(31, 74, 66, 230) : wxColour(16, 30, 33, 210)));
+		RoundRect(gc, rect, 10);
+		const double ty = rect.y + rowH / 2;
+		double tw, th;
+		if (r.kind == SettingRow::Toggle)
+		{
+			const bool on = r.getBool();
+			const double sx = rect.x + 16, sy = ty - 11;
+			gc->SetPen(*wxTRANSPARENT_PEN);
+			gc->SetBrush(wxBrush(on ? kAccent : wxColour(255, 255, 255, 50)));
+			gc->DrawRoundedRectangle(sx, sy, 40, 22, 11);
+			gc->SetBrush(wxBrush(on ? wxColour(6, 35, 28) : wxColour(207, 227, 221)));
+			gc->DrawEllipse(on ? sx + 21 : sx + 3, sy + 3, 16, 16);
+			gc->SetFont(MakeFont(13, true), on ? kText : kMuted);
+			gc->GetTextExtent(r.label, &tw, &th);
+			gc->DrawText(r.label, sx + 56, ty - th / 2);
+		}
+		else if (r.kind == SettingRow::Choice)
+		{
+			gc->SetFont(MakeFont(13, true), kText);
+			gc->GetTextExtent(r.label, &tw, &th);
+			gc->DrawText(r.label, rect.x + 18, ty - th / 2);
+			const int idx = std::clamp(r.getIndex(), 0, std::max(0, (int)r.options.size() - 1));
+			const wxString val = U8("\xE2\x80\xB9  ") + (r.options.empty() ? wxString() : r.options[idx]) + U8("  \xE2\x80\xBA");
+			gc->SetFont(MakeFont(12, true), sel ? kAccent : kText);
+			gc->GetTextExtent(val, &tw, &th);
+			gc->DrawText(val, rect.x + rect.width - 18 - tw, ty - th / 2);
+		}
+		else
+		{
+			gc->SetFont(MakeFont(13, true), sel ? kAccent : kText);
+			gc->GetTextExtent(r.label, &tw, &th);
+			gc->DrawText(r.label, rect.x + 18, ty - th / 2);
+			gc->SetFont(MakeFont(13, true), kMuted);
+			gc->GetTextExtent(U8("\xE2\x80\xBA"), &tw, &th);
+			gc->DrawText(U8("\xE2\x80\xBA"), rect.x + rect.width - 18 - tw, ty - th / 2);
+		}
+		y += rowH + gap;
+	}
+
+	gc->SetPen(*wxTRANSPARENT_PEN);
+	gc->SetBrush(wxBrush(wxColour(5, 10, 12, 200)));
+	gc->DrawRectangle(0, h - barH, w, barH);
+	gc->SetFont(MakeFont(10), kCaption);
+	const wxString hint = U8("\xE2\x86\x91 \xE2\x86\x93 \xE2\x80\x94 \xD0\xB2\xD1\x8B\xD0\xB1\xD0\xBE\xD1\x80     \xE2\x86\x90 \xE2\x86\x92 \xE2\x80\x94 \xD0\xB8\xD0\xB7\xD0\xBC\xD0\xB5\xD0\xBD\xD0\xB8\xD1\x82\xD1\x8C     A / Enter \xE2\x80\x94 \xD0\xBF\xD0\xB5\xD1\x80\xD0\xB5\xD0\xBA\xD0\xBB\xD1\x8E\xD1\x87\xD0\xB8\xD1\x82\xD1\x8C     B / Esc \xE2\x80\x94 \xD0\xBD\xD0\xB0\xD0\xB7\xD0\xB0\xD0\xB4");
 	double hw, hh;
 	gc->GetTextExtent(hint, &hw, &hh);
 	gc->DrawText(hint, w - left - hw, h - barH + (barH - hh) / 2);

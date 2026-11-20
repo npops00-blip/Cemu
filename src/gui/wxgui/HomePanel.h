@@ -69,7 +69,7 @@ private:
 		bool isPreset = false;
 		wxRect rect;
 	};
-	enum class Mode { Home, Packs };
+	enum class Mode { Home, Packs, Settings };
 	Mode m_mode = Mode::Home;
 	std::vector<PackRow> m_packRows;
 	int m_packSel = 0;
@@ -84,6 +84,33 @@ private:
 	void PacksCycle(int dir);
 	void SavePacks();
 	void OpenModManager();
+
+	// gamepad-friendly settings screen (most used options; "all settings" opens the regular dialog)
+	struct SettingRow
+	{
+		enum Kind { Header, Toggle, Choice, Action } kind = Header;
+		wxString label;
+		wxString hint;
+		std::function<bool()> getBool;
+		std::function<void(bool)> setBool;
+		std::vector<wxString> options;
+		std::function<int()> getIndex;
+		std::function<void(int)> setIndex;
+		bool wrap = true;
+		std::function<void()> action;
+		wxRect rect;
+	};
+	std::vector<SettingRow> m_setRows;
+	int m_setSel = 0;
+	int m_setScroll = 0;
+	bool m_setDirty = false;
+	void ShowSettings();
+	void LeaveSettings();
+	void BuildSettingRows();
+	void SettingsMove(int delta);
+	void SettingsActivate();
+	void SettingsCycle(int dir);
+	void PaintSettings(wxGraphicsContext* gc, double w, double h, double left);
 
 	Callbacks m_callbacks;
 	std::vector<Button> m_buttons;
